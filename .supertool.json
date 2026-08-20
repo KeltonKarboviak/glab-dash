@@ -1,0 +1,4 @@
+{
+  "introduction": "Exploring/reading local open-source projects at /Users/kelton.karboviak/Code/open-source/gh-dash and /Users/kelton.karboviak/Code/open-source/python-gitlab. allow_outside_cwd is on so read/grep/glob/tree can reach them directly, e.g.: ./supertool 'tree:/Users/kelton.karboviak/Code/open-source/gh-dash' 'grep:PATTERN:/Users/kelton.karboviak/Code/open-source/python-gitlab'",
+  "allow_outside_cwd": true
+}
