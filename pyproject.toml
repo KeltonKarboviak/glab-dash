@@ -1,0 +1,31 @@
+[project]
+name = "glab-dash"
+version = "0.1.0"
+description = "A GitLab merge request dashboard TUI"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "archunitpython>=1.5.0",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glab_dash"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+extend-exclude = [".scratch"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
