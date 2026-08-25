@@ -5,6 +5,7 @@ description = "A GitLab merge request dashboard TUI"
 requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6.0",
+    "pydantic>=2.9",
 ]
 
 [dependency-groups]
