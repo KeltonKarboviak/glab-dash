@@ -3,7 +3,9 @@ name = "glab-dash"
 version = "0.1.0"
 description = "A GitLab merge request dashboard TUI"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0",
+]
 
 [dependency-groups]
 dev = [
