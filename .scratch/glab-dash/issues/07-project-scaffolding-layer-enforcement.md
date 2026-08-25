@@ -12,7 +12,7 @@ packages.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** complete
+Status: complete
 
 - [x] `uv sync` installs a working dev environment per `mise`-pinned Python 3.14+
 - [x] `ruff check` and `ruff format --check` pass on the empty skeleton

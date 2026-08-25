@@ -13,7 +13,7 @@ the filtered MR entities for a real or fixture-backed project.
 
 **Blocked by:** 08 — Credential resolution, 09 — Config loading & section schema.
 
-**Status:** complete
+Status: complete
 
 - [x] `GITLAB_COM_URL` constant lives in Infrastructure and is the only place gitlab.com's URL is spelled out
 - [x] Infrastructure gateway implementation lists a project's MRs via python-gitlab and maps them into Domain MR entities

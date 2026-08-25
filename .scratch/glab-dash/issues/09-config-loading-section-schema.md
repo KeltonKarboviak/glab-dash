@@ -12,7 +12,7 @@ entities.
 
 **Blocked by:** 07 — Project scaffolding & layer enforcement.
 
-**Status:** complete
+Status: complete
 
 - [x] Valid YAML with one or more `sections` (each with required `title`, `scope`, matching `project`/`group` key, optional `state`/`author`/`assignee`/`labels`) parses into Domain `Section` entities in YAML order
 - [x] `refresh_interval` defaults to `60` when absent

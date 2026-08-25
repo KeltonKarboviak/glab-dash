@@ -11,7 +11,7 @@ key).
 
 **Blocked by:** 07 — Project scaffolding & layer enforcement.
 
-**Status:** complete
+Status: complete
 
 - [x] Domain function picks the first present candidate given an ordered list of optional token values, with no I/O
 - [x] Infrastructure fetcher reads the glab CLI config token, honoring `GLAB_CONFIG_DIR`
