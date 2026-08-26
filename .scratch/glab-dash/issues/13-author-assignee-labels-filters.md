@@ -8,7 +8,7 @@ listed label).
 
 **Blocked by:** 10 — Gateway + use case: list MRs for a project section.
 
-Status: closed
+Status: complete
 
 - [x] `author` filter matches MRs by exact username
 - [x] `author: "@me"` matches MRs authored by the authenticated user
