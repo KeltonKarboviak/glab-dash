@@ -10,6 +10,12 @@ class FakeMergeRequestGateway:
     def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
         return [mr for mr in self._merge_requests if mr.project == project]
 
+    def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
+        return [mr for mr in self._merge_requests if mr.project.startswith(f"{group}/")]
+
+    def list_global_merge_requests(self) -> list[MergeRequest]:
+        return list(self._merge_requests)
+
 
 def make_mr(project: str, state: MergeRequestState) -> MergeRequest:
     return MergeRequest(
@@ -35,3 +41,27 @@ def test_returns_only_merge_requests_for_the_sections_project_and_state():
     result = list_merge_requests_for_section(gateway, section)
 
     assert result == [matching]
+
+
+def test_group_scope_returns_only_merge_requests_under_the_group_and_state():
+    section = Section(title="Team MRs", scope=Scope.GROUP, group="team")
+    matching = make_mr("team/project", MergeRequestState.OPENED)
+    wrong_state = make_mr("team/project", MergeRequestState.MERGED)
+    wrong_group = make_mr("other/project", MergeRequestState.OPENED)
+    gateway = FakeMergeRequestGateway([matching, wrong_state, wrong_group])
+
+    result = list_merge_requests_for_section(gateway, section)
+
+    assert result == [matching]
+
+
+def test_global_scope_returns_every_visible_merge_request_matching_state():
+    section = Section(title="All MRs", scope=Scope.GLOBAL)
+    matching = make_mr("team/project", MergeRequestState.OPENED)
+    other_matching = make_mr("other/project", MergeRequestState.OPENED)
+    wrong_state = make_mr("team/project", MergeRequestState.MERGED)
+    gateway = FakeMergeRequestGateway([matching, other_matching, wrong_state])
+
+    result = list_merge_requests_for_section(gateway, section)
+
+    assert result == [matching, other_matching]

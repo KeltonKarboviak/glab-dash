@@ -20,6 +20,7 @@ def make_raw_mr(**overrides):
         "labels": ["backend"],
         "web_url": "https://gitlab.com/group/project/-/merge_requests/42",
         "updated_at": "2026-08-25T00:00:00Z",
+        "references": {"full": "group/project!42"},
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -28,8 +29,10 @@ def make_raw_mr(**overrides):
 class FakeMergeRequestManager:
     def __init__(self, raw_mrs):
         self._raw_mrs = raw_mrs
+        self.list_kwargs = None
 
-    def list(self, get_all=True):
+    def list(self, get_all=True, **kwargs):
+        self.list_kwargs = kwargs
         return self._raw_mrs
 
 
@@ -46,9 +49,24 @@ class FakeProjectManager:
         return self._projects_by_path[project_path]
 
 
+class FakeGroup:
+    def __init__(self, raw_mrs):
+        self.mergerequests = FakeMergeRequestManager(raw_mrs)
+
+
+class FakeGroupManager:
+    def __init__(self, groups_by_path):
+        self._groups_by_path = groups_by_path
+
+    def get(self, group_path):
+        return self._groups_by_path[group_path]
+
+
 class FakeGitlabClient:
-    def __init__(self, projects_by_path):
-        self.projects = FakeProjectManager(projects_by_path)
+    def __init__(self, projects_by_path=None, groups_by_path=None, global_raw_mrs=None):
+        self.projects = FakeProjectManager(projects_by_path or {})
+        self.groups = FakeGroupManager(groups_by_path or {})
+        self.mergerequests = FakeMergeRequestManager(global_raw_mrs or [])
 
 
 def test_lists_and_maps_a_projects_merge_requests_into_domain_entities():
@@ -80,6 +98,37 @@ def test_build_gitlab_client_uses_the_url_passed_in_not_a_hardcoded_literal():
     client = build_gitlab_client(token="secret", url=GITLAB_COM_URL)
 
     assert client.url == GITLAB_COM_URL
+
+
+def test_lists_and_maps_a_groups_merge_requests_deriving_project_from_references():
+    raw_mr = make_raw_mr(references={"full": "team/project!42"})
+    client = FakeGitlabClient(groups_by_path={"team": FakeGroup([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_group_merge_requests("team")
+
+    assert len(result) == 1
+    assert result[0].project == "team/project"
+
+
+def test_lists_and_maps_every_visible_merge_request_deriving_project_from_references():
+    raw_mr = make_raw_mr(references={"full": "team/project!42"})
+    client = FakeGitlabClient(global_raw_mrs=[raw_mr])
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_global_merge_requests()
+
+    assert len(result) == 1
+    assert result[0].project == "team/project"
+
+
+def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users():
+    client = FakeGitlabClient(global_raw_mrs=[make_raw_mr()])
+    gateway = GitlabMergeRequestGateway(client)
+
+    gateway.list_global_merge_requests()
+
+    assert client.mergerequests.list_kwargs == {"scope": "all"}
 
 
 def test_use_case_returns_correctly_filtered_mrs_via_the_real_gateway():
