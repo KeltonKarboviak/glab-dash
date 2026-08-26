@@ -20,6 +20,12 @@ class MergeRequest:
     updated_at: str
     assignee: str | None = None
     labels: list[str] = field(default_factory=list)
+    unresolved_discussion_count: int = 0
+    approvals_given: int = 0
+    approvals_required: int = 0
+    pipeline_status: str | None = None
+    lines_added: int = 0
+    lines_removed: int = 0
 
 
 def filter_by_state(

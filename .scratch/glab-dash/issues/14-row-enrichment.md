@@ -17,10 +17,16 @@ three fields here.
 
 **Blocked by:** 10 — Gateway + use case: list MRs for a project section.
 
-Status: ready-for-agent
+Status: complete
 
-- [ ] Unresolved discussion count reflects discussions with `resolved is False`, verified against a fixture with both resolved and unresolved discussions
-- [ ] Approvals render as `"approved/required"` sourced from the MR's approval state
-- [ ] Pipeline status icon reflects the MR's latest pipeline status
-- [ ] `+`/`-` line stats are sourced from a per-MR diff/changes call and reflect total lines added/removed across the MR's files
-- [ ] Domain MR entity carries these four fields; Application/Infrastructure tests cover the mapping from GitLab payloads
+- [x] Unresolved discussion count reflects discussions with `resolved is False`, verified against a fixture with both resolved and unresolved discussions
+- [x] Approvals render as `"approved/required"` sourced from the MR's approval state
+- [x] Pipeline status icon reflects the MR's latest pipeline status
+- [x] `+`/`-` line stats are sourced from a per-MR diff/changes call and reflect total lines added/removed across the MR's files
+- [x] Domain MR entity carries these four fields; Application/Infrastructure tests cover the mapping from GitLab payloads
+
+Implementation note: domain stores raw `approvals_given`/`approvals_required` ints
+and `pipeline_status` string rather than pre-formatted display strings/icons —
+formatting into `"approved/required"` and an icon belongs in the TUI row
+renderer (`rows.py`), same pattern as the existing `_STATE_ICONS` mapping.
+Row rendering itself is out of scope here; only gateway/domain enrichment.

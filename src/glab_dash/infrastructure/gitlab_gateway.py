@@ -14,8 +14,35 @@ def build_gitlab_client(token: str, url: str) -> gitlab.Gitlab:
     return gitlab.Gitlab(url, private_token=token)
 
 
+def _unresolved_discussion_count(raw_mr: Any) -> int:
+    return sum(1 for discussion in raw_mr.discussions.list(get_all=True) if not discussion.resolved)
+
+
+def _approvals(raw_mr: Any) -> tuple[int, int]:
+    approval = raw_mr.approvals.get()
+    return len(approval.approved_by), approval.approvals_required
+
+
+def _pipeline_status(raw_mr: Any) -> str | None:
+    pipelines = raw_mr.pipelines.list(get_all=True)
+    return pipelines[0].status if pipelines else None
+
+
+def _line_stats(raw_mr: Any) -> tuple[int, int]:
+    added = removed = 0
+    for change in raw_mr.changes().get("changes", []):
+        for line in change.get("diff", "").splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                added += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                removed += 1
+    return added, removed
+
+
 def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
     assignee = getattr(raw_mr, "assignee", None)
+    approvals_given, approvals_required = _approvals(raw_mr)
+    lines_added, lines_removed = _line_stats(raw_mr)
     return MergeRequest(
         iid=raw_mr.iid,
         project=project,
@@ -28,6 +55,12 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
         labels=list(raw_mr.labels),
         web_url=raw_mr.web_url,
         updated_at=raw_mr.updated_at,
+        unresolved_discussion_count=_unresolved_discussion_count(raw_mr),
+        approvals_given=approvals_given,
+        approvals_required=approvals_required,
+        pipeline_status=_pipeline_status(raw_mr),
+        lines_added=lines_added,
+        lines_removed=lines_removed,
     )
 
 

@@ -9,7 +9,14 @@ from glab_dash.infrastructure.gitlab_gateway import (
 )
 
 
-def make_raw_mr(**overrides):
+def make_raw_mr(
+    discussions=(),
+    approved_by=(),
+    approvals_required=0,
+    pipeline_statuses=(),
+    diffs=(),
+    **overrides,
+):
     defaults = {
         "iid": 42,
         "title": "Add feature",
@@ -21,6 +28,22 @@ def make_raw_mr(**overrides):
         "web_url": "https://gitlab.com/group/project/-/merge_requests/42",
         "updated_at": "2026-08-25T00:00:00Z",
         "references": {"full": "group/project!42"},
+        "discussions": SimpleNamespace(
+            list=lambda get_all=True: [
+                SimpleNamespace(resolved=resolved) for resolved in discussions
+            ]
+        ),
+        "approvals": SimpleNamespace(
+            get=lambda: SimpleNamespace(
+                approved_by=list(approved_by), approvals_required=approvals_required
+            )
+        ),
+        "pipelines": SimpleNamespace(
+            list=lambda get_all=True: [
+                SimpleNamespace(status=status) for status in pipeline_statuses
+            ]
+        ),
+        "changes": lambda: {"changes": [{"diff": diff} for diff in diffs]},
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -89,6 +112,62 @@ def test_lists_and_maps_a_projects_merge_requests_into_domain_entities():
     assert mr.web_url == raw_mr.web_url
     assert mr.updated_at == raw_mr.updated_at
     assert mr.assignee is None
+
+
+def test_unresolved_discussion_count_excludes_resolved_discussions():
+    raw_mr = make_raw_mr(discussions=[True, False, False])
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_project_merge_requests("group/project")
+
+    assert result[0].unresolved_discussion_count == 2
+
+
+def test_approvals_reflect_approved_by_and_required_count():
+    raw_mr = make_raw_mr(approved_by=[{"username": "octocat"}], approvals_required=2)
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_project_merge_requests("group/project")
+
+    assert result[0].approvals_given == 1
+    assert result[0].approvals_required == 2
+
+
+def test_pipeline_status_is_the_latest_pipelines_status():
+    raw_mr = make_raw_mr(pipeline_statuses=["success", "failed"])
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_project_merge_requests("group/project")
+
+    assert result[0].pipeline_status == "success"
+
+
+def test_pipeline_status_is_none_when_there_are_no_pipelines():
+    raw_mr = make_raw_mr(pipeline_statuses=[])
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_project_merge_requests("group/project")
+
+    assert result[0].pipeline_status is None
+
+
+def test_line_stats_sum_added_and_removed_lines_across_files_diffs():
+    diffs = [
+        "@@ -1,2 +1,3 @@\n-old line\n+++ b/file\n+new line 1\n+new line 2\n",
+        "@@ -1,1 +1,1 @@\n--- a/other\n-removed line\n",
+    ]
+    raw_mr = make_raw_mr(diffs=diffs)
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_project_merge_requests("group/project")
+
+    assert result[0].lines_added == 2
+    assert result[0].lines_removed == 2
 
 
 def test_maps_assignee_username_when_present():
