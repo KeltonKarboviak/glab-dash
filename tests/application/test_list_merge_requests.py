@@ -17,15 +17,23 @@ class FakeMergeRequestGateway:
         return list(self._merge_requests)
 
 
-def make_mr(project: str, state: MergeRequestState) -> MergeRequest:
+def make_mr(
+    project: str,
+    state: MergeRequestState,
+    author: str = "octocat",
+    assignee: str | None = None,
+    labels: list[str] | None = None,
+) -> MergeRequest:
     return MergeRequest(
         iid=1,
         project=project,
         title="Add feature",
-        author="octocat",
+        author=author,
+        assignee=assignee,
         source_branch="feature",
         target_branch="main",
         state=state,
+        labels=labels or [],
         web_url="https://gitlab.com/group/project/-/merge_requests/1",
         updated_at="2026-08-25T00:00:00Z",
     )
@@ -65,3 +73,38 @@ def test_global_scope_returns_every_visible_merge_request_matching_state():
     result = list_merge_requests_for_section(gateway, section)
 
     assert result == [matching, other_matching]
+
+
+def test_composes_state_author_and_labels_filters():
+    section = Section(
+        title="My MRs",
+        scope=Scope.PROJECT,
+        project="group/project",
+        author="@me",
+        labels=["urgent"],
+    )
+    matching = make_mr(
+        "group/project", MergeRequestState.OPENED, author="hubot", labels=["urgent"]
+    )
+    wrong_author = make_mr(
+        "group/project", MergeRequestState.OPENED, author="octocat", labels=["urgent"]
+    )
+    missing_label = make_mr("group/project", MergeRequestState.OPENED, author="hubot")
+    gateway = FakeMergeRequestGateway([matching, wrong_author, missing_label])
+
+    result = list_merge_requests_for_section(gateway, section, current_username="hubot")
+
+    assert result == [matching]
+
+
+def test_assignee_at_me_resolves_to_the_authenticated_user():
+    section = Section(
+        title="Assigned to me", scope=Scope.PROJECT, project="group/project", assignee="@me"
+    )
+    mine = make_mr("group/project", MergeRequestState.OPENED, assignee="hubot")
+    theirs = make_mr("group/project", MergeRequestState.OPENED, assignee="octocat")
+    gateway = FakeMergeRequestGateway([mine, theirs])
+
+    result = list_merge_requests_for_section(gateway, section, current_username="hubot")
+
+    assert result == [mine]

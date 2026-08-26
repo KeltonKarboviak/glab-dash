@@ -88,6 +88,17 @@ def test_lists_and_maps_a_projects_merge_requests_into_domain_entities():
     assert mr.labels == ["backend"]
     assert mr.web_url == raw_mr.web_url
     assert mr.updated_at == raw_mr.updated_at
+    assert mr.assignee is None
+
+
+def test_maps_assignee_username_when_present():
+    raw_mr = make_raw_mr(assignee={"username": "hubot"})
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    result = gateway.list_project_merge_requests("group/project")
+
+    assert result[0].assignee == "hubot"
 
 
 def test_gitlab_com_url_is_the_single_named_constant():

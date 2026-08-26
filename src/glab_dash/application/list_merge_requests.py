@@ -3,7 +3,13 @@
 from typing import Protocol
 
 from glab_dash.domain.config import Scope, Section
-from glab_dash.domain.merge_request import MergeRequest, filter_by_state
+from glab_dash.domain.merge_request import (
+    MergeRequest,
+    filter_by_assignee,
+    filter_by_author,
+    filter_by_labels,
+    filter_by_state,
+)
 
 
 class MergeRequestGateway(Protocol):
@@ -23,10 +29,13 @@ def _list_by_scope(gateway: MergeRequestGateway, section: Section) -> list[Merge
 
 
 def list_merge_requests_for_section(
-    gateway: MergeRequestGateway, section: Section
+    gateway: MergeRequestGateway, section: Section, current_username: str | None = None
 ) -> list[MergeRequest]:
-    """Return `section`'s merge requests, filtered by its configured state."""
-    # ponytail: fetches every MR in scope before filtering by state; push
-    # `state` into the gateway list calls if global-scope pagination gets slow.
+    """Return `section`'s merge requests, filtered by its configured criteria."""
+    # ponytail: fetches every MR in scope before filtering; push filters into
+    # the gateway list calls if global-scope pagination gets slow.
     merge_requests = _list_by_scope(gateway, section)
-    return filter_by_state(merge_requests, section.state)
+    merge_requests = filter_by_state(merge_requests, section.state)
+    merge_requests = filter_by_author(merge_requests, section.author, current_username)
+    merge_requests = filter_by_assignee(merge_requests, section.assignee, current_username)
+    return filter_by_labels(merge_requests, section.labels)

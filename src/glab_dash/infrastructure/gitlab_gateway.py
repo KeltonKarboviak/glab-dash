@@ -15,11 +15,13 @@ def build_gitlab_client(token: str, url: str) -> gitlab.Gitlab:
 
 
 def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
+    assignee = getattr(raw_mr, "assignee", None)
     return MergeRequest(
         iid=raw_mr.iid,
         project=project,
         title=raw_mr.title,
         author=raw_mr.author["username"],
+        assignee=assignee["username"] if assignee else None,
         source_branch=raw_mr.source_branch,
         target_branch=raw_mr.target_branch,
         state=MergeRequestState(raw_mr.state),
