@@ -1,0 +1,18 @@
+{
+  "lastChangelogVersion": "0.84.3",
+  "theme": "light/dark",
+  "defaultProvider": "openrouter",
+  "defaultModel": "moonshotai/kimi-k2.6",
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "transport": "auto",
+  "markdown": {
+    "mermaid": "streaming"
+  },
+  "showCacheMissNotices": true,
+  "enableInstallTelemetry": false,
+  "doubleEscapeAction": "tree",
+  "treeFilterMode": "default",
+  "tuiMode": "regular"
+}
