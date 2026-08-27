@@ -5,7 +5,12 @@ from typing import Any
 import gitlab
 
 from glab_dash.domain.config import MergeRequestState
-from glab_dash.domain.merge_request import MergeRequest
+from glab_dash.domain.merge_request import (
+    Discussion,
+    DiscussionNote,
+    MergeRequest,
+    MergeRequestDetail,
+)
 
 GITLAB_COM_URL = "https://gitlab.com"
 
@@ -64,6 +69,25 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
     )
 
 
+def _discussions(raw_mr: Any) -> list[Discussion]:
+    discussions = []
+    for discussion in raw_mr.discussions.list(get_all=True):
+        notes = [
+            DiscussionNote(author=note["author"]["username"], body=note["body"])
+            for note in discussion.attributes["notes"]
+        ]
+        discussions.append(Discussion(notes=notes))
+    return discussions
+
+
+def _diff_text(raw_mr: Any) -> str:
+    sections = []
+    for change in raw_mr.changes().get("changes", []):
+        sections.append(f"diff --git a/{change['old_path']} b/{change['new_path']}")
+        sections.append(change.get("diff", ""))
+    return "\n".join(sections)
+
+
 def _project_from_references(raw_mr: Any) -> str:
     return raw_mr.references["full"].rsplit("!", 1)[0]
 
@@ -88,3 +112,11 @@ class GitlabMergeRequestGateway:
     def list_global_merge_requests(self) -> list[MergeRequest]:
         raw_mrs = self._client.mergerequests.list(get_all=True, scope="all")
         return _map_all(raw_mrs)
+
+    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        raw_mr = self._client.projects.get(project).mergerequests.get(iid)
+        return MergeRequestDetail(
+            description=raw_mr.description or "",
+            discussions=_discussions(raw_mr),
+            diff=_diff_text(raw_mr),
+        )

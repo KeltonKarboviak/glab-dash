@@ -5,6 +5,7 @@ from typing import Protocol
 from glab_dash.domain.config import Scope, Section
 from glab_dash.domain.merge_request import (
     MergeRequest,
+    MergeRequestDetail,
     filter_by_assignee,
     filter_by_author,
     filter_by_labels,
@@ -16,6 +17,7 @@ class MergeRequestGateway(Protocol):
     def list_project_merge_requests(self, project: str) -> list[MergeRequest]: ...
     def list_group_merge_requests(self, group: str) -> list[MergeRequest]: ...
     def list_global_merge_requests(self) -> list[MergeRequest]: ...
+    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail: ...
 
 
 def _list_by_scope(gateway: MergeRequestGateway, section: Section) -> list[MergeRequest]:

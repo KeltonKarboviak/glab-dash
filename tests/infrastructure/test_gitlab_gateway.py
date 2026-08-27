@@ -58,6 +58,9 @@ class FakeMergeRequestManager:
         self.list_kwargs = kwargs
         return self._raw_mrs
 
+    def get(self, iid):
+        return next(raw_mr for raw_mr in self._raw_mrs if raw_mr.iid == iid)
+
 
 class FakeProject:
     def __init__(self, raw_mrs):
@@ -219,6 +222,39 @@ def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users(
     gateway.list_global_merge_requests()
 
     assert client.mergerequests.list_kwargs == {"scope": "all"}
+
+
+def test_get_merge_request_detail_returns_description_discussions_and_diff():
+    raw_mr = SimpleNamespace(
+        iid=42,
+        description="Fixes the thing",
+        discussions=SimpleNamespace(
+            list=lambda get_all=True: [
+                SimpleNamespace(
+                    attributes={
+                        "notes": [
+                            {"author": {"username": "octocat"}, "body": "Looks good"},
+                            {"author": {"username": "hubot"}, "body": "Agreed"},
+                        ]
+                    }
+                )
+            ]
+        ),
+        changes=lambda: {
+            "changes": [{"old_path": "a.py", "new_path": "a.py", "diff": "+new line\n"}]
+        },
+    )
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(client)
+
+    detail = gateway.get_merge_request_detail("group/project", 42)
+
+    assert detail.description == "Fixes the thing"
+    assert len(detail.discussions) == 1
+    assert [note.author for note in detail.discussions[0].notes] == ["octocat", "hubot"]
+    assert [note.body for note in detail.discussions[0].notes] == ["Looks good", "Agreed"]
+    assert "diff --git a/a.py b/a.py" in detail.diff
+    assert "+new line" in detail.diff
 
 
 def test_use_case_returns_correctly_filtered_mrs_via_the_real_gateway():

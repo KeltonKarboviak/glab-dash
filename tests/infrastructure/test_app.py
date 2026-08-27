@@ -1,14 +1,27 @@
 from glab_dash.domain.config import Config, MergeRequestState, Scope, Section
-from glab_dash.domain.merge_request import MergeRequest
+from glab_dash.domain.merge_request import (
+    Discussion,
+    DiscussionNote,
+    MergeRequest,
+    MergeRequestDetail,
+)
 from glab_dash.infrastructure.tui.app import GlabDashApp
 
 
 class FakeGateway:
-    def __init__(self, merge_requests: list[MergeRequest]) -> None:
+    def __init__(
+        self,
+        merge_requests: list[MergeRequest],
+        detail: MergeRequestDetail | None = None,
+    ) -> None:
         self._merge_requests = merge_requests
+        self._detail = detail or MergeRequestDetail(description="", discussions=[], diff="")
 
     def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
         return self._merge_requests
+
+    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        return self._detail
 
 
 def _make_mr(iid: int = 1) -> MergeRequest:
@@ -118,6 +131,79 @@ async def test_brackets_switch_the_active_section_tab_and_clamp_at_the_ends():
 
         await pilot.press("]", "]")
         assert app.query_one("TabbedContent").active == "section-1"
+
+
+async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail():
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    detail = MergeRequestDetail(
+        description="Fixes the thing",
+        discussions=[Discussion(notes=[DiscussionNote(author="octocat", body="Looks good")])],
+        diff="+new line\n",
+    )
+    app = GlabDashApp(config, FakeGateway([_make_mr()], detail=detail))
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.query_one("#preview-pane").display is False
+
+        await pilot.press("tab")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.query_one("#preview-pane").display is True
+        rendered = app.query_one("#preview-content").render().plain
+        assert "Fixes the thing" in rendered
+        assert "octocat" in rendered
+        assert "Looks good" in rendered
+        assert "+new line" in rendered
+
+        await pilot.press("tab")
+        assert app.query_one("#preview-pane").display is False
+
+
+async def test_enter_focuses_the_preview_pane_so_j_k_scroll_it_not_the_list():
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    app = GlabDashApp(config, FakeGateway([_make_mr(), _make_mr(iid=2)]))
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        await pilot.press("tab")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")
+
+        table = app.query_one("#table-0")
+        await pilot.press("j")
+        assert table.cursor_row == 0
+
+
+async def test_escape_returns_focus_to_the_list_so_j_k_move_the_cursor_again():
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    app = GlabDashApp(config, FakeGateway([_make_mr(), _make_mr(iid=2)]))
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        await pilot.press("tab")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.press("escape")
+
+        table = app.query_one("#table-0")
+        await pilot.press("j")
+        assert table.cursor_row == 1
 
 
 async def test_q_quits_the_app():

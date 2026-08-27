@@ -8,6 +8,24 @@ AT_ME = "@me"
 
 
 @dataclass(frozen=True)
+class DiscussionNote:
+    author: str
+    body: str
+
+
+@dataclass(frozen=True)
+class Discussion:
+    notes: list[DiscussionNote]
+
+
+@dataclass(frozen=True)
+class MergeRequestDetail:
+    description: str
+    discussions: list[Discussion]
+    diff: str
+
+
+@dataclass(frozen=True)
 class MergeRequest:
     iid: int
     project: str
@@ -69,9 +87,7 @@ def filter_by_assignee(
     return [mr for mr in merge_requests if mr.assignee == target]
 
 
-def filter_by_labels(
-    merge_requests: list[MergeRequest], labels: list[str]
-) -> list[MergeRequest]:
+def filter_by_labels(merge_requests: list[MergeRequest], labels: list[str]) -> list[MergeRequest]:
     """Return only merge requests carrying every listed label (AND-matched)."""
     if not labels:
         return list(merge_requests)
