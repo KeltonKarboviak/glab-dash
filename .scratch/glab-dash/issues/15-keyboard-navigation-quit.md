@@ -7,9 +7,9 @@ jump to the first/last row, `[`/`]` switch between section tabs, and `q` or
 
 **Blocked by:** 11 — TUI rendering: tabs + MR list for a project section.
 
-Status: ready-for-agent
+Status: complete
 
-- [ ] `j`/`k` and the arrow keys move the row cursor up/down within the active section's list
-- [ ] `g`/`G` jump the cursor to the first/last row
-- [ ] `[`/`]` switch the active section tab left/right, wrapping or clamping at the ends
-- [ ] `q` and `Ctrl+C` both quit the app cleanly
+- [x] `j`/`k` and the arrow keys move the row cursor up/down within the active section's list
+- [x] `g`/`G` jump the cursor to the first/last row
+- [x] `[`/`]` switch the active section tab left/right, wrapping or clamping at the ends
+- [x] `q` and `Ctrl+C` both quit the app cleanly

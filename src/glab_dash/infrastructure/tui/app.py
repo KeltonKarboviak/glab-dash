@@ -3,6 +3,7 @@
 from functools import partial
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.widgets import DataTable, Footer, Header, TabbedContent, TabPane
 from textual.worker import Worker, WorkerState
 
@@ -29,6 +30,17 @@ def _fetch_section_merge_requests(
 
 
 class GlabDashApp(App):
+    BINDINGS = [
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("g", "cursor_top", "Top", show=False),
+        Binding("G", "cursor_bottom", "Bottom", show=False),
+        Binding("[", "previous_tab", "Prev tab", show=False),
+        Binding("]", "next_tab", "Next tab", show=False),
+        Binding("q", "quit", "Quit", show=False),
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+    ]
+
     def __init__(self, config: Config, gateway: MergeRequestGateway) -> None:
         super().__init__()
         self._config = config
@@ -55,6 +67,42 @@ class GlabDashApp(App):
                     name=worker_name,
                     thread=True,
                 )
+
+    def _active_table(self) -> DataTable | None:
+        tabbed_content = self.query_one(TabbedContent)
+        pane = tabbed_content.active_pane
+        if pane is None:
+            return None
+        return pane.query_one(DataTable)
+
+    def action_cursor_down(self) -> None:
+        if (table := self._active_table()) is not None:
+            table.action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        if (table := self._active_table()) is not None:
+            table.action_cursor_up()
+
+    def action_cursor_top(self) -> None:
+        if (table := self._active_table()) is not None:
+            table.action_scroll_top()
+
+    def action_cursor_bottom(self) -> None:
+        if (table := self._active_table()) is not None:
+            table.action_scroll_bottom()
+
+    def action_previous_tab(self) -> None:
+        self._switch_tab(-1)
+
+    def action_next_tab(self) -> None:
+        self._switch_tab(1)
+
+    def _switch_tab(self, offset: int) -> None:
+        section_count = len(self._config.sections)
+        tabbed_content = self.query_one(TabbedContent)
+        current_index = int(tabbed_content.active.removeprefix("section-"))
+        new_index = max(0, min(section_count - 1, current_index + offset))
+        tabbed_content.active = f"section-{new_index}"
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         if event.state is not WorkerState.SUCCESS:
