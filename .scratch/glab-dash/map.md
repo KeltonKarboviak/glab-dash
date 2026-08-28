@@ -18,7 +18,7 @@ application, infrastructure), enforced by ArchUnitPython tests.
   python-gitlab at `/Users/kelton.karboviak/Code/open-source/python-gitlab`
   (the GitLab SDK, sync-only — REST calls must run off Textual's event loop
   via `run_worker`).
-- Dev tooling is locked, not open: `uv`, `ruff`, `mise`, `prek`, `pytest` +
+- Dev tooling is locked, not open: `uv`, `ruff`, `ty`, `mise`, `prek`, `pytest` +
   Textual's `Pilot`/`pytest-textual-snapshot`, `structlog` forwarded through
   stdlib `logging` via Textual's `TextualHandler`. Python 3.14+.
 - ArchUnitPython reference repo for exploration:
@@ -62,7 +62,7 @@ application, infrastructure), enforced by ArchUnitPython tests.
   notes) + diff view, all in one pane.
 - **Diff rendering** — plain colorized unified-diff text, rendered in-process
   in a Textual widget. No external pager, no syntax highlighting in v1.
-- **Dev tooling** — `uv`, `ruff`, `mise`, `prek`, `pytest` + Textual
+- **Dev tooling** — `uv`, `ruff`, `ty`, `mise`, `prek`, `pytest` + Textual
   `Pilot`/`pytest-textual-snapshot`, `structlog` via `TextualHandler`.
 - **Python version** — target 3.14+.
 - **Section YAML schema** — `scope` key (`project`/`group`/`global`) paired
@@ -92,6 +92,11 @@ application, infrastructure), enforced by ArchUnitPython tests.
   third-party bans; no fixture/scan step needed, just `assert_passes(rule)`
   in a plain pytest function (see
   [ArchUnitPython rule idioms research](issues/05-archunitpython-rule-idioms.md)).
+- **`ty` type checker** — adopted despite being pre-1.0/beta (`0.0.x`,
+  explicit no-stable-API disclaimer): it's a dev dependency only, never
+  shipped at runtime, so breaking releases just mean re-pinning, not
+  production risk; clean `uv`/`prek` fit, no ruff overlap, native Pydantic
+  awareness (see [ty type checker research](issues/19-ty-type-checker.md)).
 
 - **V1 keybindings** — hardcoded (not user-overridable) for v1: `j/k`+
   arrows list nav, `g/G` first/last, `[`/`]` section tabs, `Tab` toggle
