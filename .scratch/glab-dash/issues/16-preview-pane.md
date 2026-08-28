@@ -9,10 +9,10 @@ of navigating the list); `Esc` returns focus to the list.
 
 **Blocked by:** 11 — TUI rendering: tabs + MR list for a project section.
 
-Status: ready-for-agent
+Status: complete
 
-- [ ] `Tab` shows/hides the preview pane for the currently selected MR
-- [ ] The pane shows the MR's description, every discussion thread's notes, and a colorized unified diff
-- [ ] `Enter` moves focus into the pane; `j`/`k`/arrows then scroll the pane instead of moving the list cursor
-- [ ] `Esc` returns focus to the list, restoring list-scoped `j`/`k`/arrow behavior
-- [ ] No external pager or syntax-highlighting dependency is used for the diff
+- [x] `Tab` shows/hides the preview pane for the currently selected MR
+- [x] The pane shows the MR's description, every discussion thread's notes, and a colorized unified diff
+- [x] `Enter` moves focus into the pane; `j`/`k`/arrows then scroll the pane instead of moving the list cursor
+- [x] `Esc` returns focus to the list, restoring list-scoped `j`/`k`/arrow behavior
+- [x] No external pager or syntax-highlighting dependency is used for the diff
