@@ -8,9 +8,9 @@ path.
 
 **Blocked by:** 11 — TUI rendering: tabs + MR list for a project section.
 
-Status: ready-for-agent
+Status: complete
 
-- [ ] Sections refresh automatically at the configured `refresh_interval`
-- [ ] `r` triggers an immediate refresh without waiting for the interval
-- [ ] Both automatic and manual refresh run through `run_worker`, never blocking the event loop
-- [ ] Refreshing preserves the current tab and row cursor position where the underlying data still supports it
+- [x] Sections refresh automatically at the configured `refresh_interval`
+- [x] `r` triggers an immediate refresh without waiting for the interval
+- [x] Both automatic and manual refresh run through `run_worker`, never blocking the event loop
+- [x] Refreshing preserves the current tab and row cursor position where the underlying data still supports it

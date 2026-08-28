@@ -45,6 +45,7 @@ class GlabDashApp(App):
         Binding("tab", "toggle_preview", "Preview", show=False, priority=True),
         Binding("enter", "focus_preview", "Focus preview", show=False, priority=True),
         Binding("escape", "unfocus_preview", "Back to list", show=False, priority=True),
+        Binding("r", "refresh", "Refresh", show=False),
         Binding("q", "quit", "Quit", show=False),
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
     ]
@@ -54,6 +55,7 @@ class GlabDashApp(App):
         self._config = config
         self._gateway = gateway
         self._tables_by_worker_name: dict[str, DataTable] = {}
+        self._sections_by_worker_name: dict[str, Section] = {}
         self._merge_requests_by_table_id: dict[str, list[MergeRequest]] = {}
         self._preview_visible = False
         self._preview_focused = False
@@ -76,11 +78,23 @@ class GlabDashApp(App):
             if section.scope is Scope.PROJECT:
                 worker_name = f"section-{index}"
                 self._tables_by_worker_name[worker_name] = table
-                self.run_worker(
-                    partial(_fetch_section_merge_requests, self._gateway, section),
-                    name=worker_name,
-                    thread=True,
-                )
+                self._sections_by_worker_name[worker_name] = section
+                self._fetch_section(worker_name, section)
+        self.set_interval(self._config.refresh_interval, self._refresh_all_sections)
+
+    def _fetch_section(self, worker_name: str, section: Section) -> None:
+        self.run_worker(
+            partial(_fetch_section_merge_requests, self._gateway, section),
+            name=worker_name,
+            thread=True,
+        )
+
+    def _refresh_all_sections(self) -> None:
+        for worker_name, section in self._sections_by_worker_name.items():
+            self._fetch_section(worker_name, section)
+
+    def action_refresh(self) -> None:
+        self._refresh_all_sections()
 
     def _active_table(self) -> DataTable | None:
         tabbed_content = self.query_one(TabbedContent)
@@ -184,11 +198,15 @@ class GlabDashApp(App):
         table = self._tables_by_worker_name.get(event.worker.name)
         if table is None:
             return
+        previous_cursor_row = table.cursor_row
         merge_requests: list[MergeRequest] = event.worker.result
         self._merge_requests_by_table_id[table.id] = merge_requests
+        table.clear()
         for mr in merge_requests:
             state_icon, extended_title, labels, updated_at = render_mr_row(mr)
             table.add_row(state_icon, extended_title, labels, updated_at, height=MR_ROW_HEIGHT)
+        if table.row_count:
+            table.move_cursor(row=min(previous_cursor_row, table.row_count - 1))
 
 
 def run() -> None:

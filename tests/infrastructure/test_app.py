@@ -16,8 +16,10 @@ class FakeGateway:
     ) -> None:
         self._merge_requests = merge_requests
         self._detail = detail or MergeRequestDetail(description="", discussions=[], diff="")
+        self.project_list_calls = 0
 
     def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
+        self.project_list_calls += 1
         return self._merge_requests
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
@@ -204,6 +206,99 @@ async def test_escape_returns_focus_to_the_list_so_j_k_move_the_cursor_again():
         table = app.query_one("#table-0")
         await pilot.press("j")
         assert table.cursor_row == 1
+
+
+async def test_r_triggers_an_immediate_refresh_through_the_fetch_path():
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    gateway = FakeGateway([_make_mr()])
+    app = GlabDashApp(config, gateway)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert gateway.project_list_calls == 1
+
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert gateway.project_list_calls == 2
+
+
+async def test_refresh_preserves_the_active_tab_and_cursor_position():
+    config = Config(
+        sections=[
+            Section(title="First", scope=Scope.PROJECT, project="group/a"),
+            Section(title="Second", scope=Scope.PROJECT, project="group/b"),
+        ]
+    )
+    gateway = FakeGateway([_make_mr(), _make_mr(iid=2), _make_mr(iid=3)])
+    app = GlabDashApp(config, gateway)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        await pilot.press("]")
+        table = app.query_one("#table-1")
+        await pilot.press("j")
+        assert table.cursor_row == 1
+
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.query_one("TabbedContent").active == "section-1"
+        assert table.cursor_row == 1
+        assert table.row_count == 3
+
+
+async def test_refresh_runs_through_run_worker_without_blocking(monkeypatch):
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    app = GlabDashApp(config, FakeGateway([_make_mr()]))
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        calls = []
+        original_run_worker = app.run_worker
+
+        def tracking_run_worker(*args, **kwargs):
+            calls.append(kwargs.get("thread"))
+            return original_run_worker(*args, **kwargs)
+
+        monkeypatch.setattr(app, "run_worker", tracking_run_worker)
+
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert calls == [True]
+
+
+async def test_automatic_refresh_is_scheduled_at_the_configured_interval(monkeypatch):
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")],
+        refresh_interval=42,
+    )
+    app = GlabDashApp(config, FakeGateway([]))
+
+    intervals = []
+    original_set_interval = app.set_interval
+
+    def tracking_set_interval(seconds, *args, **kwargs):
+        intervals.append(seconds)
+        return original_set_interval(seconds, *args, **kwargs)
+
+    monkeypatch.setattr(app, "set_interval", tracking_set_interval)
+
+    async with app.run_test():
+        assert 42 in intervals
 
 
 async def test_q_quits_the_app():
