@@ -92,6 +92,21 @@ Docs (installation page) give a clear recommendation split:
 
 ## Recommendation
 
+**Overridden 2026-08-28: adopt now, not adopt-later.** The analysis below
+originally concluded adopt-later on stability grounds; the user's call,
+after grilling, is to adopt immediately. Rationale: `ty` is a dev-only
+dependency, never shipped or run at runtime, so its `0.0.x`/no-stable-API
+status is a re-pinning inconvenience on a breaking release, not a
+production risk — the stability concern doesn't carry the weight the
+original analysis gave it. Installation (`uv add --dev ty`), config
+(`[tool.ty]`), and pre-commit integration (`astral-sh/ty-pre-commit`) are
+all clean fits for glab-dash's existing `uv`/`ruff`/`prek` stack with no
+rule conflicts and native (non-plugin) Pydantic awareness. See
+[ticket 20](../issues/20-adopt-ty-type-checker.md) for the implementation.
+
+<details>
+<summary>Original recommendation (superseded)</summary>
+
 Adopt-later, not adopt-now. `ty` is officially pre-1.0/beta with an
 explicit no-stable-API disclaimer; installation (`uv add --dev ty`),
 config (`[tool.ty]`), and pre-commit integration (`astral-sh/ty-pre-commit`)
@@ -104,3 +119,5 @@ version-churn risk for a nice-to-have (extra AI guardrail on top of
 ArchUnitPython + ruff), not a functional gap. Revisit once `ty` nears or
 reaches a stable/1.0 milestone, or if a concrete correctness bug ArchUnitPython
 and ruff can't catch actually surfaces during implementation.
+
+</details>
