@@ -50,6 +50,7 @@ class GlabDashApp(App):
         Binding("enter", "focus_preview", "Focus preview", show=False, priority=True),
         Binding("escape", "unfocus_preview", "Back to list", show=False, priority=True),
         Binding("r", "refresh", "Refresh", show=False),
+        Binding("?", "toggle_help_panel", "Help", show=False),
         Binding("q", "quit", "Quit", show=False),
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
     ]
@@ -151,6 +152,12 @@ class GlabDashApp(App):
 
     def action_unfocus_preview(self) -> None:
         self._preview_focused = False
+
+    def action_toggle_help_panel(self) -> None:
+        if self.screen.query("HelpPanel"):
+            self.action_hide_help_panel()
+        else:
+            self.action_show_help_panel()
 
     def _selected_merge_request(self) -> MergeRequest | None:
         table = self._active_table()

@@ -343,3 +343,19 @@ async def test_q_quits_the_app() -> None:
     async with app.run_test() as pilot:
         await pilot.press("q")
         assert app.is_running is False
+
+
+async def test_question_mark_toggles_the_help_panel() -> None:
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    app = GlabDashApp(config, FakeGateway([]))
+
+    async with app.run_test() as pilot:
+        await pilot.press("?")
+        await pilot.pause()
+        assert app.screen.query("HelpPanel")
+
+        await pilot.press("?")
+        await pilot.pause()
+        assert not app.screen.query("HelpPanel")
