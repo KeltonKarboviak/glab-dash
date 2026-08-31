@@ -1,5 +1,5 @@
 Type: task
-Status: ready-for-agent
+Status: complete
 
 ## Task
 
