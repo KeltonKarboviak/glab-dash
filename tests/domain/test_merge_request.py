@@ -31,7 +31,7 @@ def make_mr(
     )
 
 
-def test_filter_by_state_keeps_only_matching_state():
+def test_filter_by_state_keeps_only_matching_state() -> None:
     opened = make_mr(MergeRequestState.OPENED)
     merged = make_mr(MergeRequestState.MERGED)
 
@@ -40,7 +40,7 @@ def test_filter_by_state_keeps_only_matching_state():
     assert result == [opened]
 
 
-def test_filter_by_state_all_returns_every_mr():
+def test_filter_by_state_all_returns_every_mr() -> None:
     opened = make_mr(MergeRequestState.OPENED)
     merged = make_mr(MergeRequestState.MERGED)
 
@@ -49,7 +49,7 @@ def test_filter_by_state_all_returns_every_mr():
     assert result == [opened, merged]
 
 
-def test_filter_by_author_matches_exact_username():
+def test_filter_by_author_matches_exact_username() -> None:
     mine = make_mr(author="octocat")
     theirs = make_mr(author="hubot")
 
@@ -58,7 +58,7 @@ def test_filter_by_author_matches_exact_username():
     assert result == [mine]
 
 
-def test_filter_by_author_at_me_matches_the_authenticated_user():
+def test_filter_by_author_at_me_matches_the_authenticated_user() -> None:
     mine = make_mr(author="hubot")
     theirs = make_mr(author="octocat")
 
@@ -67,7 +67,7 @@ def test_filter_by_author_at_me_matches_the_authenticated_user():
     assert result == [mine]
 
 
-def test_filter_by_author_none_returns_every_mr():
+def test_filter_by_author_none_returns_every_mr() -> None:
     mine = make_mr(author="hubot")
     theirs = make_mr(author="octocat")
 
@@ -76,12 +76,12 @@ def test_filter_by_author_none_returns_every_mr():
     assert result == [mine, theirs]
 
 
-def test_filter_by_author_at_me_without_current_username_raises():
+def test_filter_by_author_at_me_without_current_username_raises() -> None:
     with pytest.raises(ValueError, match="@me"):
         filter_by_author([make_mr()], "@me", current_username=None)
 
 
-def test_filter_by_assignee_matches_exact_username():
+def test_filter_by_assignee_matches_exact_username() -> None:
     mine = make_mr(assignee="octocat")
     theirs = make_mr(assignee="hubot")
 
@@ -90,7 +90,7 @@ def test_filter_by_assignee_matches_exact_username():
     assert result == [mine]
 
 
-def test_filter_by_assignee_at_me_matches_the_authenticated_user():
+def test_filter_by_assignee_at_me_matches_the_authenticated_user() -> None:
     mine = make_mr(assignee="hubot")
     theirs = make_mr(assignee="octocat")
 
@@ -99,7 +99,7 @@ def test_filter_by_assignee_at_me_matches_the_authenticated_user():
     assert result == [mine]
 
 
-def test_filter_by_assignee_none_returns_every_mr():
+def test_filter_by_assignee_none_returns_every_mr() -> None:
     mine = make_mr(assignee="hubot")
     theirs = make_mr(assignee="octocat")
 
@@ -108,7 +108,7 @@ def test_filter_by_assignee_none_returns_every_mr():
     assert result == [mine, theirs]
 
 
-def test_filter_by_labels_requires_every_listed_label():
+def test_filter_by_labels_requires_every_listed_label() -> None:
     both = make_mr(labels=["bug", "urgent"])
     one = make_mr(labels=["bug"])
 
@@ -117,7 +117,7 @@ def test_filter_by_labels_requires_every_listed_label():
     assert result == [both]
 
 
-def test_filter_by_labels_empty_returns_every_mr():
+def test_filter_by_labels_empty_returns_every_mr() -> None:
     both = make_mr(labels=["bug", "urgent"])
     one = make_mr(labels=["bug"])
 

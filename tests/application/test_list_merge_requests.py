@@ -1,6 +1,6 @@
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
-from glab_dash.domain.merge_request import MergeRequest
+from glab_dash.domain.merge_request import MergeRequest, MergeRequestDetail
 
 
 class FakeMergeRequestGateway:
@@ -15,6 +15,9 @@ class FakeMergeRequestGateway:
 
     def list_global_merge_requests(self) -> list[MergeRequest]:
         return list(self._merge_requests)
+
+    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        raise NotImplementedError
 
 
 def make_mr(
@@ -39,7 +42,7 @@ def make_mr(
     )
 
 
-def test_returns_only_merge_requests_for_the_sections_project_and_state():
+def test_returns_only_merge_requests_for_the_sections_project_and_state() -> None:
     section = Section(title="My MRs", scope=Scope.PROJECT, project="group/project")
     matching = make_mr("group/project", MergeRequestState.OPENED)
     wrong_state = make_mr("group/project", MergeRequestState.MERGED)
@@ -51,7 +54,7 @@ def test_returns_only_merge_requests_for_the_sections_project_and_state():
     assert result == [matching]
 
 
-def test_group_scope_returns_only_merge_requests_under_the_group_and_state():
+def test_group_scope_returns_only_merge_requests_under_the_group_and_state() -> None:
     section = Section(title="Team MRs", scope=Scope.GROUP, group="team")
     matching = make_mr("team/project", MergeRequestState.OPENED)
     wrong_state = make_mr("team/project", MergeRequestState.MERGED)
@@ -63,7 +66,7 @@ def test_group_scope_returns_only_merge_requests_under_the_group_and_state():
     assert result == [matching]
 
 
-def test_global_scope_returns_every_visible_merge_request_matching_state():
+def test_global_scope_returns_every_visible_merge_request_matching_state() -> None:
     section = Section(title="All MRs", scope=Scope.GLOBAL)
     matching = make_mr("team/project", MergeRequestState.OPENED)
     other_matching = make_mr("other/project", MergeRequestState.OPENED)
@@ -75,7 +78,7 @@ def test_global_scope_returns_every_visible_merge_request_matching_state():
     assert result == [matching, other_matching]
 
 
-def test_composes_state_author_and_labels_filters():
+def test_composes_state_author_and_labels_filters() -> None:
     section = Section(
         title="My MRs",
         scope=Scope.PROJECT,
@@ -83,9 +86,7 @@ def test_composes_state_author_and_labels_filters():
         author="@me",
         labels=["urgent"],
     )
-    matching = make_mr(
-        "group/project", MergeRequestState.OPENED, author="hubot", labels=["urgent"]
-    )
+    matching = make_mr("group/project", MergeRequestState.OPENED, author="hubot", labels=["urgent"])
     wrong_author = make_mr(
         "group/project", MergeRequestState.OPENED, author="octocat", labels=["urgent"]
     )
@@ -97,7 +98,7 @@ def test_composes_state_author_and_labels_filters():
     assert result == [matching]
 
 
-def test_assignee_at_me_resolves_to_the_authenticated_user():
+def test_assignee_at_me_resolves_to_the_authenticated_user() -> None:
     section = Section(
         title="Assigned to me", scope=Scope.PROJECT, project="group/project", assignee="@me"
     )

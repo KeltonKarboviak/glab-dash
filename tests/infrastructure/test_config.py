@@ -1,16 +1,18 @@
+from pathlib import Path
+
 import pytest
 
 from glab_dash.domain.config import ConfigError, MergeRequestState, Scope
 from glab_dash.infrastructure.config import load_config, resolve_config_path
 
 
-def write_config(path, text):
+def write_config(path: Path, text: str) -> Path:
     path.write_text(text)
     return path
 
 
 class TestLoadConfig:
-    def test_parses_sections_in_yaml_order(self, tmp_path):
+    def test_parses_sections_in_yaml_order(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             """
@@ -55,7 +57,7 @@ class TestLoadConfig:
         assert third.project is None
         assert third.group is None
 
-    def test_refresh_interval_defaults_to_60(self, tmp_path):
+    def test_refresh_interval_defaults_to_60(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             'sections:\n  - {title: "All", scope: global}\n',
@@ -65,7 +67,7 @@ class TestLoadConfig:
 
         assert config.refresh_interval == 60
 
-    def test_refresh_interval_parses_when_present(self, tmp_path):
+    def test_refresh_interval_parses_when_present(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             'refresh_interval: 30\nsections:\n  - {title: "All", scope: global}\n',
@@ -75,7 +77,7 @@ class TestLoadConfig:
 
         assert config.refresh_interval == 30
 
-    def test_token_parses_when_present(self, tmp_path):
+    def test_token_parses_when_present(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             'token: "glpat-abc123"\nsections:\n  - {title: "All", scope: global}\n',
@@ -85,16 +87,16 @@ class TestLoadConfig:
 
         assert config.token == "glpat-abc123"
 
-    def test_missing_required_field_raises_config_error(self, tmp_path):
+    def test_missing_required_field_raises_config_error(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
-            'sections:\n  - {scope: global}\n',
+            "sections:\n  - {scope: global}\n",
         )
 
         with pytest.raises(ConfigError):
             load_config(config_path)
 
-    def test_bad_scope_value_raises_config_error(self, tmp_path):
+    def test_bad_scope_value_raises_config_error(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             'sections:\n  - {title: "All", scope: nonsense}\n',
@@ -103,7 +105,7 @@ class TestLoadConfig:
         with pytest.raises(ConfigError):
             load_config(config_path)
 
-    def test_bad_state_value_raises_config_error(self, tmp_path):
+    def test_bad_state_value_raises_config_error(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             'sections:\n  - {title: "All", scope: global, state: nonsense}\n',
@@ -112,7 +114,7 @@ class TestLoadConfig:
         with pytest.raises(ConfigError):
             load_config(config_path)
 
-    def test_project_scope_missing_project_key_raises_config_error(self, tmp_path):
+    def test_project_scope_missing_project_key_raises_config_error(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             'sections:\n  - {title: "My Reviews", scope: project}\n',
@@ -121,7 +123,7 @@ class TestLoadConfig:
         with pytest.raises(ConfigError):
             load_config(config_path)
 
-    def test_group_scope_missing_group_key_raises_config_error(self, tmp_path):
+    def test_group_scope_missing_group_key_raises_config_error(self, tmp_path: Path) -> None:
         config_path = write_config(
             tmp_path / "config.yml",
             'sections:\n  - {title: "Team MRs", scope: group}\n',
@@ -130,19 +132,21 @@ class TestLoadConfig:
         with pytest.raises(ConfigError):
             load_config(config_path)
 
-    def test_no_sections_raises_config_error(self, tmp_path):
+    def test_no_sections_raises_config_error(self, tmp_path: Path) -> None:
         config_path = write_config(tmp_path / "config.yml", "sections: []\n")
 
         with pytest.raises(ConfigError):
             load_config(config_path)
 
-    def test_missing_file_raises_config_error(self, tmp_path):
+    def test_missing_file_raises_config_error(self, tmp_path: Path) -> None:
         with pytest.raises(ConfigError):
             load_config(tmp_path / "missing.yml")
 
 
 class TestResolveConfigPath:
-    def test_prefers_repo_local_config_when_present(self, tmp_path, monkeypatch):
+    def test_prefers_repo_local_config_when_present(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.chdir(tmp_path)
         repo_local = write_config(tmp_path / ".glab-dash.yml", "sections: []\n")
 
@@ -150,7 +154,9 @@ class TestResolveConfigPath:
 
         assert resolved == repo_local
 
-    def test_falls_back_to_xdg_config_home(self, tmp_path, monkeypatch):
+    def test_falls_back_to_xdg_config_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.chdir(tmp_path)
         xdg_home = tmp_path / "xdg"
         xdg_home.mkdir()
@@ -159,7 +165,9 @@ class TestResolveConfigPath:
 
         assert resolved == xdg_home / "glab-dash" / "config.yml"
 
-    def test_falls_back_to_home_config_dir_when_no_xdg_config_home(self, tmp_path, monkeypatch):
+    def test_falls_back_to_home_config_dir_when_no_xdg_config_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
 

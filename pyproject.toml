@@ -18,6 +18,7 @@ dev = [
     "ruff>=0.8",
     "pytest-textual-snapshot>=1.0.0",
     "pytest-asyncio>=1.4.0",
+    "ty>=0.0.76",
 ]
 
 [build-system]
@@ -33,7 +34,10 @@ target-version = "py314"
 extend-exclude = [".scratch"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "F", "I", "UP", "ANN001", "ANN201", "ANN204", "ANN205", "ANN206"]
+
+[tool.ty.src]
+exclude = [".scratch"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

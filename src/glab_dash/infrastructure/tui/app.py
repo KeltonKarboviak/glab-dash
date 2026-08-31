@@ -14,7 +14,7 @@ from glab_dash.application.list_merge_requests import (
     MergeRequestGateway,
     list_merge_requests_for_section,
 )
-from glab_dash.domain.config import Config, Scope, Section
+from glab_dash.domain.config import Config, ConfigError, Section
 from glab_dash.domain.merge_request import MergeRequest, MergeRequestDetail
 from glab_dash.infrastructure.config import load_config, resolve_config_path
 from glab_dash.infrastructure.credentials import resolve_gitlab_token
@@ -79,11 +79,10 @@ class GlabDashApp(App):
         for index, section in enumerate(self._config.sections):
             table = self.query_one(f"#table-{index}", DataTable)
             table.add_columns("", "Merge Request", "Labels", "Updated")
-            if section.scope is Scope.PROJECT:
-                worker_name = f"section-{index}"
-                self._tables_by_worker_name[worker_name] = table
-                self._sections_by_worker_name[worker_name] = section
-                self._fetch_section(worker_name, section)
+            worker_name = f"section-{index}"
+            self._tables_by_worker_name[worker_name] = table
+            self._sections_by_worker_name[worker_name] = section
+            self._fetch_section(worker_name, section)
         self.set_interval(self._config.refresh_interval, self._refresh_all_sections)
         log.info("tui mounted", section_count=len(self._config.sections))
 
@@ -198,13 +197,16 @@ class GlabDashApp(App):
         if event.state is not WorkerState.SUCCESS:
             return
         if event.worker.name == PREVIEW_WORKER_NAME:
-            self._render_preview(event.worker.result)
+            detail = event.worker.result
+            assert detail is not None, "SUCCESS worker must have a result"
+            self._render_preview(detail)
             return
         table = self._tables_by_worker_name.get(event.worker.name)
         if table is None:
             return
         previous_cursor_row = table.cursor_row
-        merge_requests: list[MergeRequest] = event.worker.result
+        merge_requests = event.worker.result
+        assert merge_requests is not None, "SUCCESS worker must have a result"
         self._merge_requests_by_table_id[table.id] = merge_requests
         table.clear()
         for mr in merge_requests:
@@ -218,6 +220,8 @@ def run() -> None:
     configure_logging()
     config = load_config(resolve_config_path())
     token = resolve_gitlab_token({"token": config.token})
+    if token is None:
+        raise ConfigError("no GitLab token found: set it in config, GITLAB_TOKEN, or glab CLI")
     client = build_gitlab_client(token, GITLAB_COM_URL)
     GlabDashApp(config, GitlabMergeRequestGateway(client)).run()
 

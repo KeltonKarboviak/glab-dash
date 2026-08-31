@@ -1,7 +1,7 @@
 from glab_dash.infrastructure.tui.diff import colorize_diff
 
 
-def test_added_and_removed_lines_get_distinct_styles():
+def test_added_and_removed_lines_get_distinct_styles() -> None:
     diff = "@@ -1,1 +1,1 @@\n-old line\n+new line\n"
 
     text = colorize_diff(diff)
@@ -12,7 +12,7 @@ def test_added_and_removed_lines_get_distinct_styles():
     assert spans_by_style["cyan"] == "@@ -1,1 +1,1 @@\n"
 
 
-def test_unrecognized_lines_are_left_unstyled():
+def test_unrecognized_lines_are_left_unstyled() -> None:
     text = colorize_diff("plain context line\n")
 
     assert text.spans == []

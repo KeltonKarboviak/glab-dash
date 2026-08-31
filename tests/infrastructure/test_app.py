@@ -1,3 +1,10 @@
+from typing import cast
+
+import pytest
+from rich.text import Text
+from textual.timer import Timer, TimerCallback
+from textual.widgets import DataTable, Static, Tab, TabbedContent
+
 from glab_dash.domain.config import Config, MergeRequestState, Scope, Section
 from glab_dash.domain.merge_request import (
     Discussion,
@@ -22,6 +29,12 @@ class FakeGateway:
         self.project_list_calls += 1
         return self._merge_requests
 
+    def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
+        return self._merge_requests
+
+    def list_global_merge_requests(self) -> list[MergeRequest]:
+        return self._merge_requests
+
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
         return self._detail
 
@@ -41,18 +54,18 @@ def _make_mr(iid: int = 1) -> MergeRequest:
     )
 
 
-async def test_project_section_renders_a_tab_with_its_title():
+async def test_project_section_renders_a_tab_with_its_title() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
     app = GlabDashApp(config, FakeGateway([_make_mr()]))
 
     async with app.run_test():
-        tab = next(iter(app.query("Tab")))
+        tab = next(iter(app.query(Tab)))
         assert tab.label_text == "My Project"
 
 
-async def test_project_section_table_lists_its_merge_requests():
+async def test_project_section_table_lists_its_merge_requests() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -61,11 +74,27 @@ async def test_project_section_table_lists_its_merge_requests():
     async with app.run_test() as pilot:
         await app.workers.wait_for_complete()
         await pilot.pause()
-        table = app.query_one("#table-0")
+        table = app.query_one("#table-0", DataTable)
         assert table.row_count == 2
 
 
-async def test_sections_render_as_tabs_in_yaml_order():
+async def test_group_and_global_sections_also_fetch_and_list_merge_requests() -> None:
+    config = Config(
+        sections=[
+            Section(title="Group", scope=Scope.GROUP, group="ramsey-solutions/data-platform"),
+            Section(title="Global", scope=Scope.GLOBAL),
+        ]
+    )
+    app = GlabDashApp(config, FakeGateway([_make_mr(), _make_mr(iid=2)]))
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.query_one("#table-0", DataTable).row_count == 2
+        assert app.query_one("#table-1", DataTable).row_count == 2
+
+
+async def test_sections_render_as_tabs_in_yaml_order() -> None:
     config = Config(
         sections=[
             Section(title="First", scope=Scope.PROJECT, project="group/a"),
@@ -75,11 +104,11 @@ async def test_sections_render_as_tabs_in_yaml_order():
     app = GlabDashApp(config, FakeGateway([]))
 
     async with app.run_test():
-        tab_titles = [tab.label_text for tab in app.query("Tab")]
+        tab_titles = [tab.label_text for tab in app.query(Tab)]
         assert tab_titles == ["First", "Second"]
 
 
-async def test_j_and_k_move_the_row_cursor_within_the_active_section():
+async def test_j_and_k_move_the_row_cursor_within_the_active_section() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -88,7 +117,7 @@ async def test_j_and_k_move_the_row_cursor_within_the_active_section():
     async with app.run_test() as pilot:
         await app.workers.wait_for_complete()
         await pilot.pause()
-        table = app.query_one("#table-0")
+        table = app.query_one("#table-0", DataTable)
 
         await pilot.press("j", "j")
         assert table.cursor_row == 2
@@ -97,7 +126,7 @@ async def test_j_and_k_move_the_row_cursor_within_the_active_section():
         assert table.cursor_row == 1
 
 
-async def test_g_and_shift_g_jump_to_first_and_last_row():
+async def test_g_and_shift_g_jump_to_first_and_last_row() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -106,7 +135,7 @@ async def test_g_and_shift_g_jump_to_first_and_last_row():
     async with app.run_test() as pilot:
         await app.workers.wait_for_complete()
         await pilot.pause()
-        table = app.query_one("#table-0")
+        table = app.query_one("#table-0", DataTable)
 
         await pilot.press("G")
         assert table.cursor_row == 2
@@ -115,7 +144,7 @@ async def test_g_and_shift_g_jump_to_first_and_last_row():
         assert table.cursor_row == 0
 
 
-async def test_brackets_switch_the_active_section_tab_and_clamp_at_the_ends():
+async def test_brackets_switch_the_active_section_tab_and_clamp_at_the_ends() -> None:
     config = Config(
         sections=[
             Section(title="First", scope=Scope.PROJECT, project="group/a"),
@@ -129,13 +158,13 @@ async def test_brackets_switch_the_active_section_tab_and_clamp_at_the_ends():
         await pilot.pause()
 
         await pilot.press("[")
-        assert app.query_one("TabbedContent").active == "section-0"
+        assert app.query_one(TabbedContent).active == "section-0"
 
         await pilot.press("]", "]")
-        assert app.query_one("TabbedContent").active == "section-1"
+        assert app.query_one(TabbedContent).active == "section-1"
 
 
-async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail():
+async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -157,7 +186,7 @@ async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail():
         await pilot.pause()
 
         assert app.query_one("#preview-pane").display is True
-        rendered = app.query_one("#preview-content").render().plain
+        rendered = cast(Text, app.query_one("#preview-content", Static).content).plain
         assert "Fixes the thing" in rendered
         assert "octocat" in rendered
         assert "Looks good" in rendered
@@ -167,7 +196,7 @@ async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail():
         assert app.query_one("#preview-pane").display is False
 
 
-async def test_enter_focuses_the_preview_pane_so_j_k_scroll_it_not_the_list():
+async def test_enter_focuses_the_preview_pane_so_j_k_scroll_it_not_the_list() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -182,12 +211,12 @@ async def test_enter_focuses_the_preview_pane_so_j_k_scroll_it_not_the_list():
         await pilot.pause()
         await pilot.press("enter")
 
-        table = app.query_one("#table-0")
+        table = app.query_one("#table-0", DataTable)
         await pilot.press("j")
         assert table.cursor_row == 0
 
 
-async def test_escape_returns_focus_to_the_list_so_j_k_move_the_cursor_again():
+async def test_escape_returns_focus_to_the_list_so_j_k_move_the_cursor_again() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -203,12 +232,12 @@ async def test_escape_returns_focus_to_the_list_so_j_k_move_the_cursor_again():
         await pilot.press("enter")
         await pilot.press("escape")
 
-        table = app.query_one("#table-0")
+        table = app.query_one("#table-0", DataTable)
         await pilot.press("j")
         assert table.cursor_row == 1
 
 
-async def test_r_triggers_an_immediate_refresh_through_the_fetch_path():
+async def test_r_triggers_an_immediate_refresh_through_the_fetch_path() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -227,7 +256,7 @@ async def test_r_triggers_an_immediate_refresh_through_the_fetch_path():
         assert gateway.project_list_calls == 2
 
 
-async def test_refresh_preserves_the_active_tab_and_cursor_position():
+async def test_refresh_preserves_the_active_tab_and_cursor_position() -> None:
     config = Config(
         sections=[
             Section(title="First", scope=Scope.PROJECT, project="group/a"),
@@ -242,7 +271,7 @@ async def test_refresh_preserves_the_active_tab_and_cursor_position():
         await pilot.pause()
 
         await pilot.press("]")
-        table = app.query_one("#table-1")
+        table = app.query_one("#table-1", DataTable)
         await pilot.press("j")
         assert table.cursor_row == 1
 
@@ -250,12 +279,14 @@ async def test_refresh_preserves_the_active_tab_and_cursor_position():
         await app.workers.wait_for_complete()
         await pilot.pause()
 
-        assert app.query_one("TabbedContent").active == "section-1"
+        assert app.query_one(TabbedContent).active == "section-1"
         assert table.cursor_row == 1
         assert table.row_count == 3
 
 
-async def test_refresh_runs_through_run_worker_without_blocking(monkeypatch):
+async def test_refresh_runs_through_run_worker_without_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )
@@ -281,7 +312,9 @@ async def test_refresh_runs_through_run_worker_without_blocking(monkeypatch):
         assert calls == [True]
 
 
-async def test_automatic_refresh_is_scheduled_at_the_configured_interval(monkeypatch):
+async def test_automatic_refresh_is_scheduled_at_the_configured_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")],
         refresh_interval=42,
@@ -291,9 +324,9 @@ async def test_automatic_refresh_is_scheduled_at_the_configured_interval(monkeyp
     intervals = []
     original_set_interval = app.set_interval
 
-    def tracking_set_interval(seconds, *args, **kwargs):
+    def tracking_set_interval(seconds: float, callback: TimerCallback | None = None) -> Timer:
         intervals.append(seconds)
-        return original_set_interval(seconds, *args, **kwargs)
+        return original_set_interval(seconds, callback)
 
     monkeypatch.setattr(app, "set_interval", tracking_set_interval)
 
@@ -301,7 +334,7 @@ async def test_automatic_refresh_is_scheduled_at_the_configured_interval(monkeyp
         assert 42 in intervals
 
 
-async def test_q_quits_the_app():
+async def test_q_quits_the_app() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
     )

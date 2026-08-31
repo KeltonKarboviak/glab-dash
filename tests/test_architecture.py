@@ -30,7 +30,7 @@ _APPLICATION = re.compile(r"/application(/|$)")
 _INFRASTRUCTURE = re.compile(r"/infrastructure(/|$)")
 
 
-def test_domain_is_stdlib_only():
+def test_domain_is_stdlib_only() -> None:
     rule = (
         project_files(SRC_ROOT)
         .in_folder(_DOMAIN)
@@ -42,7 +42,7 @@ def test_domain_is_stdlib_only():
     assert_passes(rule)
 
 
-def test_domain_does_not_depend_on_other_layers():
+def test_domain_does_not_depend_on_other_layers() -> None:
     rule = (
         project_files(SRC_ROOT)
         .in_folder(_DOMAIN)
@@ -54,7 +54,7 @@ def test_domain_does_not_depend_on_other_layers():
     assert_passes(rule)
 
 
-def test_application_does_not_depend_on_infrastructure():
+def test_application_does_not_depend_on_infrastructure() -> None:
     rule = (
         project_files(SRC_ROOT)
         .in_folder(_APPLICATION)

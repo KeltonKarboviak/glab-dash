@@ -6,7 +6,7 @@ from textual.logging import TextualHandler
 from glab_dash.infrastructure.logging import configure_logging
 
 
-def test_configure_logging_routes_stdlib_root_logger_through_textual_handler():
+def test_configure_logging_routes_stdlib_root_logger_through_textual_handler() -> None:
     configure_logging()
 
     assert any(isinstance(handler, TextualHandler) for handler in logging.root.handlers)

@@ -28,8 +28,10 @@ log = structlog.get_logger(__name__)
 def _list_by_scope(gateway: MergeRequestGateway, section: Section) -> list[MergeRequest]:
     match section.scope:
         case Scope.PROJECT:
+            assert section.project is not None, "PROJECT scope requires section.project"
             return gateway.list_project_merge_requests(section.project)
         case Scope.GROUP:
+            assert section.group is not None, "GROUP scope requires section.group"
             return gateway.list_group_merge_requests(section.group)
         case Scope.GLOBAL:
             return gateway.list_global_merge_requests()
