@@ -1,0 +1,5 @@
+# Minimal config: one project section, token resolved from glab CLI/env.
+sections:
+  - title: My Project
+    scope: project
+    project: my-namespace/my-project

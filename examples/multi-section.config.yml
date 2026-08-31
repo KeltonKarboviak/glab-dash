@@ -1,0 +1,22 @@
+# Multiple sections across scopes, with filters and an explicit token.
+refresh_interval: 30
+token: glpat-xxxxxxxxxxxxxxxxxxxx
+
+sections:
+  - title: My Open MRs
+    scope: group
+    group: my-group
+    author: my-username
+    state: opened
+
+  - title: Needs My Review
+    scope: group
+    group: my-group
+    assignee: my-username
+    labels:
+      - needs-review
+
+  - title: Backend Service
+    scope: project
+    project: my-group/backend-service
+    state: all

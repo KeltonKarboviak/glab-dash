@@ -1,0 +1,6 @@
+# Global scope: MRs across all projects the token's user can see, assigned to them.
+sections:
+  - title: Assigned To Me
+    scope: global
+    assignee: my-username
+    state: opened
