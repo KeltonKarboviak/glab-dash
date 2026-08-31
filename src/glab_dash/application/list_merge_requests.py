@@ -2,6 +2,8 @@
 
 from typing import Protocol
 
+import structlog
+
 from glab_dash.domain.config import Scope, Section
 from glab_dash.domain.merge_request import (
     MergeRequest,
@@ -20,6 +22,9 @@ class MergeRequestGateway(Protocol):
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail: ...
 
 
+log = structlog.get_logger(__name__)
+
+
 def _list_by_scope(gateway: MergeRequestGateway, section: Section) -> list[MergeRequest]:
     match section.scope:
         case Scope.PROJECT:
@@ -34,6 +39,7 @@ def list_merge_requests_for_section(
     gateway: MergeRequestGateway, section: Section, current_username: str | None = None
 ) -> list[MergeRequest]:
     """Return `section`'s merge requests, filtered by its configured criteria."""
+    log.info("listing merge requests", section=section.title, scope=section.scope)
     # ponytail: fetches every MR in scope before filtering; push filters into
     # the gateway list calls if global-scope pagination gets slow.
     merge_requests = _list_by_scope(gateway, section)

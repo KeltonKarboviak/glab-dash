@@ -2,6 +2,7 @@
 
 from functools import partial
 
+import structlog
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -22,10 +23,13 @@ from glab_dash.infrastructure.gitlab_gateway import (
     GitlabMergeRequestGateway,
     build_gitlab_client,
 )
+from glab_dash.infrastructure.logging import configure_logging
 from glab_dash.infrastructure.tui.diff import colorize_diff
 from glab_dash.infrastructure.tui.rows import MR_ROW_HEIGHT, render_mr_row
 
 PREVIEW_WORKER_NAME = "preview-detail"
+
+log = structlog.get_logger(__name__)
 
 
 def _fetch_section_merge_requests(
@@ -81,6 +85,7 @@ class GlabDashApp(App):
                 self._sections_by_worker_name[worker_name] = section
                 self._fetch_section(worker_name, section)
         self.set_interval(self._config.refresh_interval, self._refresh_all_sections)
+        log.info("tui mounted", section_count=len(self._config.sections))
 
     def _fetch_section(self, worker_name: str, section: Section) -> None:
         self.run_worker(
@@ -210,6 +215,7 @@ class GlabDashApp(App):
 
 
 def run() -> None:
+    configure_logging()
     config = load_config(resolve_config_path())
     token = resolve_gitlab_token({"token": config.token})
     client = build_gitlab_client(token, GITLAB_COM_URL)

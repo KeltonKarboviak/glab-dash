@@ -8,6 +8,7 @@ dependencies = [
     "pydantic>=2.9",
     "python-gitlab>=8.5.0",
     "textual>=8.2.8",
+    "structlog>=24.4.0",
 ]
 
 [dependency-groups]

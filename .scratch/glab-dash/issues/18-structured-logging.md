@@ -7,8 +7,8 @@ maintain.
 
 **Blocked by:** 07 — Project scaffolding & layer enforcement.
 
-Status: ready-for-agent
+Status: done
 
-- [ ] `structlog` is configured to route through stdlib `logging`
-- [ ] Log records reach Textual's `TextualHandler` and appear in the dev console (`textual console` / `textual run --dev`)
-- [ ] A sample log call from each layer (Domain excluded, since it stays stdlib-only and I/O-free) demonstrates the pipeline works end-to-end
+- [x] `structlog` is configured to route through stdlib `logging`
+- [x] Log records reach Textual's `TextualHandler` and appear in the dev console (`textual console` / `textual run --dev`)
+- [x] A sample log call from each layer (Domain excluded, since it stays stdlib-only and I/O-free) demonstrates the pipeline works end-to-end
