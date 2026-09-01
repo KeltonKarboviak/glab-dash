@@ -4,6 +4,7 @@ from typing import cast
 
 import gitlab
 import pytest
+from textual.worker import active_worker
 
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
@@ -126,6 +127,36 @@ def test_lists_and_maps_a_projects_merge_requests_into_domain_entities() -> None
     assert mr.web_url == raw_mr.web_url
     assert mr.updated_at == raw_mr.updated_at
     assert mr.assignee is None
+
+
+def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
+    """Regression: the TUI hung on quit because fetches kept enriching every MR."""
+
+    class FakeCancellableWorker:
+        is_cancelled = False
+
+    worker = FakeCancellableWorker()
+    token = active_worker.set(worker)
+
+    def cancel_after_first_discussions_call(get_all: bool = True) -> list[SimpleNamespace]:
+        worker.is_cancelled = True
+        return []
+
+    cancelling_raw_mr = make_raw_mr(iid=1)
+    cancelling_raw_mr.discussions.list = cancel_after_first_discussions_call
+    untouched_raw_mr = make_raw_mr(iid=2)
+    client = FakeGitlabClient(
+        {"group/project": FakeProject([cancelling_raw_mr, untouched_raw_mr])}
+    )
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    try:
+        result = gateway.list_project_merge_requests("group/project")
+    finally:
+        active_worker.reset(token)
+
+    assert len(result) == 1
+    assert result[0].iid == 1
 
 
 def test_unresolved_discussion_count_excludes_resolved_discussions() -> None:

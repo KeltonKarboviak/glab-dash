@@ -3,6 +3,7 @@
 from typing import Any, NoReturn
 
 import gitlab
+from textual.worker import NoActiveWorker, get_current_worker
 
 from glab_dash.domain.config import MergeRequestState
 from glab_dash.domain.merge_request import (
@@ -14,6 +15,14 @@ from glab_dash.domain.merge_request import (
 )
 
 GITLAB_COM_URL = "https://gitlab.com"
+
+
+def _quit_requested() -> bool:
+    """Whether the Textual worker running this fetch has been cancelled (e.g. app quit)."""
+    try:
+        return get_current_worker().is_cancelled
+    except NoActiveWorker:
+        return False
 
 
 def build_gitlab_client(token: str, url: str) -> gitlab.Gitlab:
@@ -95,7 +104,12 @@ def _project_from_references(raw_mr: Any) -> str:
 
 def _map_all(raw_mrs: Any) -> list[MergeRequest]:
     """Map raw MRs whose project isn't already known, deriving it per-MR."""
-    return [_to_domain(raw_mr, _project_from_references(raw_mr)) for raw_mr in raw_mrs]
+    merge_requests = []
+    for raw_mr in raw_mrs:
+        if _quit_requested():
+            break
+        merge_requests.append(_to_domain(raw_mr, _project_from_references(raw_mr)))
+    return merge_requests
 
 
 def _reraise_not_found(kind: str, name: str, error: gitlab.exceptions.GitlabGetError) -> NoReturn:
@@ -114,7 +128,12 @@ class GitlabMergeRequestGateway:
         except gitlab.exceptions.GitlabGetError as e:
             _reraise_not_found("project", project, e)
         raw_mrs = raw_project.mergerequests.list(get_all=True)
-        return [_to_domain(raw_mr, project) for raw_mr in raw_mrs]
+        merge_requests = []
+        for raw_mr in raw_mrs:
+            if _quit_requested():
+                break
+            merge_requests.append(_to_domain(raw_mr, project))
+        return merge_requests
 
     def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
         try:
