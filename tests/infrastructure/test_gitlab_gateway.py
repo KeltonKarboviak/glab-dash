@@ -9,6 +9,7 @@ from textual.worker import active_worker
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
 from glab_dash.domain.merge_request import SectionNotFoundError
+from glab_dash.infrastructure import gitlab_gateway
 from glab_dash.infrastructure.gitlab_gateway import (
     GITLAB_COM_URL,
     GitlabMergeRequestGateway,
@@ -129,8 +130,17 @@ def test_lists_and_maps_a_projects_merge_requests_into_domain_entities() -> None
     assert mr.assignee is None
 
 
-def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
-    """Regression: the TUI hung on quit because fetches kept enriching every MR."""
+def test_stops_starting_new_enrichment_batches_once_the_worker_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the TUI hung on quit because fetches kept enriching every MR.
+
+    Enrichment now runs `_ENRICHMENT_BATCH_SIZE` MRs at a time on a thread
+    pool, so cancellation is only checked *between* batches -- an in-flight
+    batch always finishes (its threads are already running), but no new
+    batch is started once cancelled.
+    """
+    monkeypatch.setattr(gitlab_gateway, "_ENRICHMENT_BATCH_SIZE", 2)
 
     class FakeCancellableWorker:
         is_cancelled = False
@@ -138,15 +148,16 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
     worker = FakeCancellableWorker()
     token = active_worker.set(worker)
 
-    def cancel_after_first_discussions_call(get_all: bool = True) -> list[SimpleNamespace]:
+    def cancel_after_first_batchs_discussions_call(get_all: bool = True) -> list[SimpleNamespace]:
         worker.is_cancelled = True
         return []
 
     cancelling_raw_mr = make_raw_mr(iid=1)
-    cancelling_raw_mr.discussions.list = cancel_after_first_discussions_call
-    untouched_raw_mr = make_raw_mr(iid=2)
+    cancelling_raw_mr.discussions.list = cancel_after_first_batchs_discussions_call
+    same_batch_raw_mr = make_raw_mr(iid=2)
+    next_batch_raw_mr = make_raw_mr(iid=3)
     client = FakeGitlabClient(
-        {"group/project": FakeProject([cancelling_raw_mr, untouched_raw_mr])}
+        {"group/project": FakeProject([cancelling_raw_mr, same_batch_raw_mr, next_batch_raw_mr])}
     )
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
@@ -155,8 +166,7 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
     finally:
         active_worker.reset(token)
 
-    assert len(result) == 1
-    assert result[0].iid == 1
+    assert {mr.iid for mr in result} == {1, 2}
 
 
 def test_unresolved_discussion_count_excludes_resolved_discussions() -> None:

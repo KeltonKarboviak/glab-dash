@@ -1,5 +1,6 @@
 """Lists a project's merge requests from GitLab via python-gitlab."""
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, NoReturn
 
 import gitlab
@@ -113,17 +114,31 @@ def _project_from_references(raw_mr: Any) -> str:
     return raw_mr.references["full"].rsplit("!", 1)[0]
 
 
-def _map_all(raw_mrs: Any, project_of: Any = _project_from_references) -> list[MergeRequest]:
-    """Map raw MRs to domain entities, stopping early if the fetch is cancelled.
+_ENRICHMENT_BATCH_SIZE = 8
 
-    `project_of` derives each MR's project; defaults to reading it off the MR
-    itself for scopes (group/global) that don't already know it.
+
+def _batched(items: list[Any], size: int) -> list[list[Any]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _map_all(raw_mrs: Any, project_of: Any = _project_from_references) -> list[MergeRequest]:
+    """Map raw MRs to domain entities, enriching `_ENRICHMENT_BATCH_SIZE` at a
+    time on a thread pool so the 4 blocking enrichment calls per MR overlap
+    instead of running one MR fully before starting the next.
+
+    Cancellation is only checked *between* batches: threads already started
+    for the current batch always finish (there's no cheap way to abort a
+    blocking HTTP call mid-flight), but no new batch is started once
+    cancelled.
     """
     merge_requests = []
-    for raw_mr in raw_mrs:
-        if _quit_requested():
-            break
-        merge_requests.append(_to_domain(raw_mr, project_of(raw_mr)))
+    with ThreadPoolExecutor(max_workers=_ENRICHMENT_BATCH_SIZE) as pool:
+        for batch in _batched(list(raw_mrs), _ENRICHMENT_BATCH_SIZE):
+            if _quit_requested():
+                break
+            merge_requests.extend(
+                pool.map(lambda raw_mr: _to_domain(raw_mr, project_of(raw_mr)), batch)
+            )
     return merge_requests
 
 
