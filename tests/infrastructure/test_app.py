@@ -26,14 +26,14 @@ class FakeGateway:
         self._detail = detail or MergeRequestDetail(description="", discussions=[], diff="")
         self.project_list_calls = 0
 
-    def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
+    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
         self.project_list_calls += 1
         return self._merge_requests
 
-    def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
+    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
         return self._merge_requests
 
-    def list_global_merge_requests(self) -> list[MergeRequest]:
+    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
         return self._merge_requests
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
@@ -41,13 +41,13 @@ class FakeGateway:
 
 
 class FailingGateway:
-    def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
+    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
         raise SectionNotFoundError(f"project '{project}' not found")
 
-    def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
+    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
         raise SectionNotFoundError(f"group '{group}' not found")
 
-    def list_global_merge_requests(self) -> list[MergeRequest]:
+    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
         return []
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:

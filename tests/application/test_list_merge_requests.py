@@ -4,16 +4,22 @@ from glab_dash.domain.merge_request import MergeRequest, MergeRequestDetail
 
 
 class FakeMergeRequestGateway:
+    """Ignores the server-side filter kwargs and returns everything for its
+    scope, relying on the application layer's client-side filters to narrow
+    the result -- mirrors how a real GitLab server would already have
+    filtered before the app ever sees the list.
+    """
+
     def __init__(self, merge_requests: list[MergeRequest]) -> None:
         self._merge_requests = merge_requests
 
-    def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
+    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
         return [mr for mr in self._merge_requests if mr.project == project]
 
-    def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
+    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
         return [mr for mr in self._merge_requests if mr.project.startswith(f"{group}/")]
 
-    def list_global_merge_requests(self) -> list[MergeRequest]:
+    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
         return list(self._merge_requests)
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:

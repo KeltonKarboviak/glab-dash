@@ -314,6 +314,62 @@ def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users(
     assert client.mergerequests.list_kwargs == {"scope": "all"}
 
 
+def test_list_project_merge_requests_forwards_state_author_assignee_and_labels_server_side() -> (
+    None
+):
+    """Regression: fetching every MR then filtering client-side made a 20k-MR group
+
+    fetch (and enrich!) its entire history for a section that only wanted open MRs.
+    """
+    fake_project = FakeProject([make_raw_mr()])
+    client = FakeGitlabClient({"group/project": fake_project})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_project_merge_requests(
+        "group/project",
+        state=MergeRequestState.OPENED,
+        author="octocat",
+        assignee="hubot",
+        labels=["urgent", "backend"],
+    )
+
+    assert fake_project.mergerequests.list_kwargs == {
+        "state": "opened",
+        "author_username": "octocat",
+        "assignee_username": "hubot",
+        "labels": "urgent,backend",
+    }
+
+
+def test_list_project_merge_requests_omits_state_param_when_state_is_all() -> None:
+    fake_project = FakeProject([make_raw_mr()])
+    client = FakeGitlabClient({"group/project": fake_project})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_project_merge_requests("group/project", state=MergeRequestState.ALL)
+
+    assert fake_project.mergerequests.list_kwargs == {}
+
+
+def test_list_group_merge_requests_forwards_filters_server_side() -> None:
+    fake_group = FakeGroup([make_raw_mr()])
+    client = FakeGitlabClient(groups_by_path={"team": fake_group})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_group_merge_requests("team", state=MergeRequestState.OPENED, labels=["urgent"])
+
+    assert fake_group.mergerequests.list_kwargs == {"state": "opened", "labels": "urgent"}
+
+
+def test_list_global_merge_requests_forwards_filters_alongside_scope_all() -> None:
+    client = FakeGitlabClient(global_raw_mrs=[make_raw_mr()])
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_global_merge_requests(state=MergeRequestState.OPENED, author="octocat")
+
+    assert client.mergerequests.list_kwargs == {"scope": "all", "state": "opened", "author_username": "octocat"}
+
+
 def test_get_merge_request_detail_returns_description_discussions_and_diff() -> None:
     raw_mr = SimpleNamespace(
         iid=42,

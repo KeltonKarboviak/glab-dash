@@ -133,28 +133,79 @@ def _reraise_not_found(kind: str, name: str, error: gitlab.exceptions.GitlabGetE
     raise error
 
 
+def _server_side_filters(
+    state: MergeRequestState,
+    author: str | None,
+    assignee: str | None,
+    labels: list[str],
+) -> dict[str, Any]:
+    """Query params GitLab's list endpoints accept to filter before enrichment.
+
+    Filtering here instead of after the fetch avoids paying the per-MR
+    enrichment cost (approvals/pipelines/discussions/changes) for MRs the
+    section doesn't even want -- e.g. a group with 20k total MRs but only 57
+    open ones.
+    """
+    filters: dict[str, Any] = {}
+    if state is not MergeRequestState.ALL:
+        filters["state"] = state.value
+    if author is not None:
+        filters["author_username"] = author
+    if assignee is not None:
+        filters["assignee_username"] = assignee
+    if labels:
+        filters["labels"] = ",".join(labels)
+    return filters
+
+
 class GitlabMergeRequestGateway:
     def __init__(self, client: gitlab.Gitlab) -> None:
         self._client = client
 
-    def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
+    def list_project_merge_requests(
+        self,
+        project: str,
+        *,
+        state: MergeRequestState = MergeRequestState.ALL,
+        author: str | None = None,
+        assignee: str | None = None,
+        labels: list[str] | None = None,
+    ) -> list[MergeRequest]:
         try:
             raw_project = self._client.projects.get(project)
         except gitlab.exceptions.GitlabGetError as e:
             _reraise_not_found("project", project, e)
-        raw_mrs = raw_project.mergerequests.list(get_all=True)
+        filters = _server_side_filters(state, author, assignee, labels or [])
+        raw_mrs = raw_project.mergerequests.list(get_all=True, **filters)
         return _map_all(raw_mrs, project_of=lambda _raw_mr: project)
 
-    def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
+    def list_group_merge_requests(
+        self,
+        group: str,
+        *,
+        state: MergeRequestState = MergeRequestState.ALL,
+        author: str | None = None,
+        assignee: str | None = None,
+        labels: list[str] | None = None,
+    ) -> list[MergeRequest]:
         try:
             raw_group = self._client.groups.get(group)
         except gitlab.exceptions.GitlabGetError as e:
             _reraise_not_found("group", group, e)
-        raw_mrs = raw_group.mergerequests.list(get_all=True)
+        filters = _server_side_filters(state, author, assignee, labels or [])
+        raw_mrs = raw_group.mergerequests.list(get_all=True, **filters)
         return _map_all(raw_mrs)
 
-    def list_global_merge_requests(self) -> list[MergeRequest]:
-        raw_mrs = self._client.mergerequests.list(get_all=True, scope="all")
+    def list_global_merge_requests(
+        self,
+        *,
+        state: MergeRequestState = MergeRequestState.ALL,
+        author: str | None = None,
+        assignee: str | None = None,
+        labels: list[str] | None = None,
+    ) -> list[MergeRequest]:
+        filters = _server_side_filters(state, author, assignee, labels or [])
+        raw_mrs = self._client.mergerequests.list(get_all=True, scope="all", **filters)
         return _map_all(raw_mrs)
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:

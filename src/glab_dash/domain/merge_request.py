@@ -59,7 +59,8 @@ def filter_by_state(
     return [mr for mr in merge_requests if mr.state is state]
 
 
-def _resolve_username(username: str | None, current_username: str | None) -> str | None:
+def resolve_username(username: str | None, current_username: str | None) -> str | None:
+    """Resolve `"@me"` to `current_username`; pass through any other value."""
     if username != AT_ME:
         return username
     if current_username is None:
@@ -73,7 +74,7 @@ def filter_by_author(
     current_username: str | None = None,
 ) -> list[MergeRequest]:
     """Return only merge requests authored by `author` (`"@me"` resolves)."""
-    target = _resolve_username(author, current_username)
+    target = resolve_username(author, current_username)
     if target is None:
         return list(merge_requests)
     return [mr for mr in merge_requests if mr.author == target]
@@ -85,7 +86,7 @@ def filter_by_assignee(
     current_username: str | None = None,
 ) -> list[MergeRequest]:
     """Return only merge requests assigned to `assignee` (`"@me"` resolves)."""
-    target = _resolve_username(assignee, current_username)
+    target = resolve_username(assignee, current_username)
     if target is None:
         return list(merge_requests)
     return [mr for mr in merge_requests if mr.assignee == target]
