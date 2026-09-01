@@ -102,13 +102,17 @@ def _project_from_references(raw_mr: Any) -> str:
     return raw_mr.references["full"].rsplit("!", 1)[0]
 
 
-def _map_all(raw_mrs: Any) -> list[MergeRequest]:
-    """Map raw MRs whose project isn't already known, deriving it per-MR."""
+def _map_all(raw_mrs: Any, project_of: Any = _project_from_references) -> list[MergeRequest]:
+    """Map raw MRs to domain entities, stopping early if the fetch is cancelled.
+
+    `project_of` derives each MR's project; defaults to reading it off the MR
+    itself for scopes (group/global) that don't already know it.
+    """
     merge_requests = []
     for raw_mr in raw_mrs:
         if _quit_requested():
             break
-        merge_requests.append(_to_domain(raw_mr, _project_from_references(raw_mr)))
+        merge_requests.append(_to_domain(raw_mr, project_of(raw_mr)))
     return merge_requests
 
 
@@ -128,12 +132,7 @@ class GitlabMergeRequestGateway:
         except gitlab.exceptions.GitlabGetError as e:
             _reraise_not_found("project", project, e)
         raw_mrs = raw_project.mergerequests.list(get_all=True)
-        merge_requests = []
-        for raw_mr in raw_mrs:
-            if _quit_requested():
-                break
-            merge_requests.append(_to_domain(raw_mr, project))
-        return merge_requests
+        return _map_all(raw_mrs, project_of=lambda _raw_mr: project)
 
     def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
         try:
