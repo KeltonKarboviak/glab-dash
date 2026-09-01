@@ -1,6 +1,6 @@
 """Lists a project's merge requests from GitLab via python-gitlab."""
 
-from typing import Any
+from typing import Any, NoReturn
 
 import gitlab
 
@@ -10,6 +10,7 @@ from glab_dash.domain.merge_request import (
     DiscussionNote,
     MergeRequest,
     MergeRequestDetail,
+    SectionNotFoundError,
 )
 
 GITLAB_COM_URL = "https://gitlab.com"
@@ -97,16 +98,30 @@ def _map_all(raw_mrs: Any) -> list[MergeRequest]:
     return [_to_domain(raw_mr, _project_from_references(raw_mr)) for raw_mr in raw_mrs]
 
 
+def _reraise_not_found(kind: str, name: str, error: gitlab.exceptions.GitlabGetError) -> NoReturn:
+    if error.response_code == 404:
+        raise SectionNotFoundError(f"{kind} '{name}' not found") from error
+    raise error
+
+
 class GitlabMergeRequestGateway:
     def __init__(self, client: gitlab.Gitlab) -> None:
         self._client = client
 
     def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
-        raw_mrs = self._client.projects.get(project).mergerequests.list(get_all=True)
+        try:
+            raw_project = self._client.projects.get(project)
+        except gitlab.exceptions.GitlabGetError as e:
+            _reraise_not_found("project", project, e)
+        raw_mrs = raw_project.mergerequests.list(get_all=True)
         return [_to_domain(raw_mr, project) for raw_mr in raw_mrs]
 
     def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
-        raw_mrs = self._client.groups.get(group).mergerequests.list(get_all=True)
+        try:
+            raw_group = self._client.groups.get(group)
+        except gitlab.exceptions.GitlabGetError as e:
+            _reraise_not_found("group", group, e)
+        raw_mrs = raw_group.mergerequests.list(get_all=True)
         return _map_all(raw_mrs)
 
     def list_global_merge_requests(self) -> list[MergeRequest]:

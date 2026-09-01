@@ -11,6 +11,7 @@ from glab_dash.domain.merge_request import (
     DiscussionNote,
     MergeRequest,
     MergeRequestDetail,
+    SectionNotFoundError,
 )
 from glab_dash.infrastructure.tui.app import GlabDashApp
 
@@ -39,6 +40,20 @@ class FakeGateway:
         return self._detail
 
 
+class FailingGateway:
+    def list_project_merge_requests(self, project: str) -> list[MergeRequest]:
+        raise SectionNotFoundError(f"project '{project}' not found")
+
+    def list_group_merge_requests(self, group: str) -> list[MergeRequest]:
+        raise SectionNotFoundError(f"group '{group}' not found")
+
+    def list_global_merge_requests(self) -> list[MergeRequest]:
+        return []
+
+    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        raise AssertionError("not used in these tests")
+
+
 def _make_mr(iid: int = 1) -> MergeRequest:
     return MergeRequest(
         iid=iid,
@@ -63,6 +78,20 @@ async def test_project_section_renders_a_tab_with_its_title() -> None:
     async with app.run_test():
         tab = next(iter(app.query(Tab)))
         assert tab.label_text == "My Project"
+
+
+async def test_group_not_found_renders_an_error_row_instead_of_crashing() -> None:
+    config = Config(sections=[Section(title="Bad Group", scope=Scope.GROUP, group="data-platform")])
+    app = GlabDashApp(config, FailingGateway())
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        table = app.query_one("#table-0", DataTable)
+        assert table.row_count == 1
+        row = table.get_row_at(0)
+        assert "data-platform" in str(row[1])
+        assert "not found" in str(row[1])
 
 
 async def test_project_section_table_lists_its_merge_requests() -> None:

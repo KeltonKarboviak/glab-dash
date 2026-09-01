@@ -3,9 +3,11 @@ from types import SimpleNamespace
 from typing import cast
 
 import gitlab
+import pytest
 
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
+from glab_dash.domain.merge_request import SectionNotFoundError
 from glab_dash.infrastructure.gitlab_gateway import (
     GITLAB_COM_URL,
     GitlabMergeRequestGateway,
@@ -264,6 +266,41 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
     assert [note.body for note in detail.discussions[0].notes] == ["Looks good", "Agreed"]
     assert "diff --git a/a.py b/a.py" in detail.diff
     assert "+new line" in detail.diff
+
+
+class RaisingManager:
+    def __init__(self, response_code: int) -> None:
+        self._response_code = response_code
+
+    def get(self, path: str) -> SimpleNamespace:
+        raise gitlab.exceptions.GitlabGetError(response_code=self._response_code)
+
+
+def test_list_group_merge_requests_raises_section_not_found_on_404() -> None:
+    client = FakeGitlabClient()
+    client.groups = cast("FakeGroupManager", RaisingManager(response_code=404))
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    with pytest.raises(SectionNotFoundError):
+        gateway.list_group_merge_requests("data-platform")
+
+
+def test_list_project_merge_requests_raises_section_not_found_on_404() -> None:
+    client = FakeGitlabClient()
+    client.projects = cast("FakeProjectManager", RaisingManager(response_code=404))
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    with pytest.raises(SectionNotFoundError):
+        gateway.list_project_merge_requests("group/missing")
+
+
+def test_list_group_merge_requests_reraises_non_404_gitlab_errors() -> None:
+    client = FakeGitlabClient()
+    client.groups = cast("FakeGroupManager", RaisingManager(response_code=500))
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    with pytest.raises(gitlab.exceptions.GitlabGetError):
+        gateway.list_group_merge_requests("data-platform")
 
 
 def test_use_case_returns_correctly_filtered_mrs_via_the_real_gateway() -> None:

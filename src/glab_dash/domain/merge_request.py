@@ -7,6 +7,10 @@ from glab_dash.domain.config import MergeRequestState
 AT_ME = "@me"
 
 
+class SectionNotFoundError(Exception):
+    """Raised when a section's configured project or group doesn't exist on GitLab."""
+
+
 @dataclass(frozen=True)
 class DiscussionNote:
     author: str

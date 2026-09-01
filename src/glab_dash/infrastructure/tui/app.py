@@ -92,6 +92,7 @@ class GlabDashApp(App):
             partial(_fetch_section_merge_requests, self._gateway, section),
             name=worker_name,
             thread=True,
+            exit_on_error=False,
         )
 
     def _refresh_all_sections(self) -> None:
@@ -201,6 +202,9 @@ class GlabDashApp(App):
         tabbed_content.active = f"section-{new_index}"
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.state is WorkerState.ERROR and event.worker.name != PREVIEW_WORKER_NAME:
+            self._render_section_error(event.worker.name, event.worker.error)
+            return
         if event.state is not WorkerState.SUCCESS:
             return
         if event.worker.name == PREVIEW_WORKER_NAME:
@@ -221,6 +225,14 @@ class GlabDashApp(App):
             table.add_row(state_icon, extended_title, labels, updated_at, height=MR_ROW_HEIGHT)
         if table.row_count:
             table.move_cursor(row=min(previous_cursor_row, table.row_count - 1))
+
+    def _render_section_error(self, worker_name: str, error: BaseException | None) -> None:
+        table = self._tables_by_worker_name.get(worker_name)
+        if table is None:
+            return
+        self._merge_requests_by_table_id[table.id] = []
+        table.clear()
+        table.add_row("", f"⚠ {error}", "", "")
 
 
 def run() -> None:
