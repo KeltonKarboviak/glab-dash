@@ -30,20 +30,31 @@ def build_gitlab_client(token: str, url: str) -> gitlab.Gitlab:
 
 
 def _unresolved_discussion_count(raw_mr: Any) -> int:
+    # ponytail: group/global-scoped MRs are GitLab's bare GroupMergeRequest/
+    # MergeRequest types, which have no `discussions` manager -- only
+    # ProjectMergeRequest does. Skip enrichment rather than crash.
+    if not hasattr(raw_mr, "discussions"):
+        return 0
     return sum(1 for discussion in raw_mr.discussions.list(get_all=True) if not discussion.resolved)
 
 
 def _approvals(raw_mr: Any) -> tuple[int, int]:
+    if not hasattr(raw_mr, "approvals"):
+        return 0, 0
     approval = raw_mr.approvals.get()
     return len(approval.approved_by), approval.approvals_required
 
 
 def _pipeline_status(raw_mr: Any) -> str | None:
+    if not hasattr(raw_mr, "pipelines"):
+        return None
     pipelines = raw_mr.pipelines.list(get_all=True)
     return pipelines[0].status if pipelines else None
 
 
 def _line_stats(raw_mr: Any) -> tuple[int, int]:
+    if not hasattr(raw_mr, "changes"):
+        return 0, 0
     added = removed = 0
     for change in raw_mr.changes().get("changes", []):
         for line in change.get("diff", "").splitlines():

@@ -257,6 +257,54 @@ def test_lists_and_maps_every_visible_merge_request_deriving_project_from_refere
     assert result[0].project == "team/project"
 
 
+def _make_bare_raw_mr(**overrides: object) -> SimpleNamespace:
+    """A group/global-scoped merge request as GitLab actually returns it.
+
+    Real `GroupMergeRequest`/`MergeRequest` objects have no `approvals`,
+    `pipelines`, `discussions`, or `changes` manager -- only `ProjectMergeRequest`
+    does. `make_raw_mr()` stubs those managers on every fixture, which hid this
+    shape from tests.
+    """
+    raw_mr = make_raw_mr(**overrides)
+    for missing_attr in ("approvals", "pipelines", "discussions", "changes"):
+        delattr(raw_mr, missing_attr)
+    return raw_mr
+
+
+def test_lists_a_groups_merge_requests_without_project_only_managers() -> None:
+    raw_mr = _make_bare_raw_mr(references={"full": "team/project!42"})
+    client = FakeGitlabClient(groups_by_path={"team": FakeGroup([raw_mr])})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    result = gateway.list_group_merge_requests("team")
+
+    assert len(result) == 1
+    mr = result[0]
+    assert mr.approvals_given == 0
+    assert mr.approvals_required == 0
+    assert mr.pipeline_status is None
+    assert mr.unresolved_discussion_count == 0
+    assert mr.lines_added == 0
+    assert mr.lines_removed == 0
+
+
+def test_lists_global_merge_requests_without_project_only_managers() -> None:
+    raw_mr = _make_bare_raw_mr(references={"full": "team/project!42"})
+    client = FakeGitlabClient(global_raw_mrs=[raw_mr])
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    result = gateway.list_global_merge_requests()
+
+    assert len(result) == 1
+    mr = result[0]
+    assert mr.approvals_given == 0
+    assert mr.approvals_required == 0
+    assert mr.pipeline_status is None
+    assert mr.unresolved_discussion_count == 0
+    assert mr.lines_added == 0
+    assert mr.lines_removed == 0
+
+
 def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users() -> None:
     client = FakeGitlabClient(global_raw_mrs=[make_raw_mr()])
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
