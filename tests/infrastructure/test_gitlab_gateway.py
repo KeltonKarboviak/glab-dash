@@ -9,6 +9,7 @@ from textual.worker import active_worker
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
 from glab_dash.domain.merge_request import SectionNotFoundError
+from glab_dash.infrastructure import gitlab_gateway
 from glab_dash.infrastructure.gitlab_gateway import (
     GITLAB_COM_URL,
     GitlabMergeRequestGateway,
@@ -129,8 +130,17 @@ def test_lists_and_maps_a_projects_merge_requests_into_domain_entities() -> None
     assert mr.assignee is None
 
 
-def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
-    """Regression: the TUI hung on quit because fetches kept enriching every MR."""
+def test_stops_starting_new_enrichment_batches_once_the_worker_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the TUI hung on quit because fetches kept enriching every MR.
+
+    Enrichment now runs `_ENRICHMENT_BATCH_SIZE` MRs at a time on a thread
+    pool, so cancellation is only checked *between* batches -- an in-flight
+    batch always finishes (its threads are already running), but no new
+    batch is started once cancelled.
+    """
+    monkeypatch.setattr(gitlab_gateway, "_ENRICHMENT_BATCH_SIZE", 2)
 
     class FakeCancellableWorker:
         is_cancelled = False
@@ -138,15 +148,16 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
     worker = FakeCancellableWorker()
     token = active_worker.set(worker)
 
-    def cancel_after_first_discussions_call(get_all: bool = True) -> list[SimpleNamespace]:
+    def cancel_after_first_batchs_approvals_call() -> SimpleNamespace:
         worker.is_cancelled = True
-        return []
+        return SimpleNamespace(approved_by=[], approvals_required=0)
 
     cancelling_raw_mr = make_raw_mr(iid=1)
-    cancelling_raw_mr.discussions.list = cancel_after_first_discussions_call
-    untouched_raw_mr = make_raw_mr(iid=2)
+    cancelling_raw_mr.approvals.get = cancel_after_first_batchs_approvals_call
+    same_batch_raw_mr = make_raw_mr(iid=2)
+    next_batch_raw_mr = make_raw_mr(iid=3)
     client = FakeGitlabClient(
-        {"group/project": FakeProject([cancelling_raw_mr, untouched_raw_mr])}
+        {"group/project": FakeProject([cancelling_raw_mr, same_batch_raw_mr, next_batch_raw_mr])}
     )
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
@@ -155,18 +166,7 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
     finally:
         active_worker.reset(token)
 
-    assert len(result) == 1
-    assert result[0].iid == 1
-
-
-def test_unresolved_discussion_count_excludes_resolved_discussions() -> None:
-    raw_mr = make_raw_mr(discussions=[True, False, False])
-    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
-    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
-
-    result = gateway.list_project_merge_requests("group/project")
-
-    assert result[0].unresolved_discussion_count == 2
+    assert {mr.iid for mr in result} == {1, 2}
 
 
 def test_approvals_reflect_approved_by_and_required_count() -> None:
@@ -178,26 +178,6 @@ def test_approvals_reflect_approved_by_and_required_count() -> None:
 
     assert result[0].approvals_given == 1
     assert result[0].approvals_required == 2
-
-
-def test_pipeline_status_is_the_latest_pipelines_status() -> None:
-    raw_mr = make_raw_mr(pipeline_statuses=["success", "failed"])
-    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
-    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
-
-    result = gateway.list_project_merge_requests("group/project")
-
-    assert result[0].pipeline_status == "success"
-
-
-def test_pipeline_status_is_none_when_there_are_no_pipelines() -> None:
-    raw_mr = make_raw_mr(pipeline_statuses=[])
-    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
-    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
-
-    result = gateway.list_project_merge_requests("group/project")
-
-    assert result[0].pipeline_status is None
 
 
 def test_line_stats_sum_added_and_removed_lines_across_files_diffs() -> None:
@@ -282,8 +262,6 @@ def test_lists_a_groups_merge_requests_without_project_only_managers() -> None:
     mr = result[0]
     assert mr.approvals_given == 0
     assert mr.approvals_required == 0
-    assert mr.pipeline_status is None
-    assert mr.unresolved_discussion_count == 0
     assert mr.lines_added == 0
     assert mr.lines_removed == 0
 
@@ -299,8 +277,6 @@ def test_lists_global_merge_requests_without_project_only_managers() -> None:
     mr = result[0]
     assert mr.approvals_given == 0
     assert mr.approvals_required == 0
-    assert mr.pipeline_status is None
-    assert mr.unresolved_discussion_count == 0
     assert mr.lines_added == 0
     assert mr.lines_removed == 0
 
@@ -389,6 +365,7 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
         changes=lambda: {
             "changes": [{"old_path": "a.py", "new_path": "a.py", "diff": "+new line\n"}]
         },
+        pipelines=SimpleNamespace(list=lambda get_all=True: [SimpleNamespace(status="success")]),
     )
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
@@ -401,6 +378,7 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
     assert [note.body for note in detail.discussions[0].notes] == ["Looks good", "Agreed"]
     assert "diff --git a/a.py b/a.py" in detail.diff
     assert "+new line" in detail.diff
+    assert detail.pipeline_status == "success"
 
 
 class RaisingManager:

@@ -1,5 +1,6 @@
 """Lists a project's merge requests from GitLab via python-gitlab."""
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, NoReturn
 
 import gitlab
@@ -29,16 +30,10 @@ def build_gitlab_client(token: str, url: str) -> gitlab.Gitlab:
     return gitlab.Gitlab(url, private_token=token)
 
 
-def _unresolved_discussion_count(raw_mr: Any) -> int:
-    # ponytail: group/global-scoped MRs are GitLab's bare GroupMergeRequest/
-    # MergeRequest types, which have no `discussions` manager -- only
-    # ProjectMergeRequest does. Skip enrichment rather than crash.
-    if not hasattr(raw_mr, "discussions"):
-        return 0
-    return sum(1 for discussion in raw_mr.discussions.list(get_all=True) if not discussion.resolved)
-
-
 def _approvals(raw_mr: Any) -> tuple[int, int]:
+    # ponytail: group/global-scoped MRs are GitLab's bare GroupMergeRequest/
+    # MergeRequest types, which have no `approvals` manager -- only
+    # ProjectMergeRequest does. Skip enrichment rather than crash.
     if not hasattr(raw_mr, "approvals"):
         return 0, 0
     approval = raw_mr.approvals.get()
@@ -81,10 +76,8 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
         labels=list(raw_mr.labels),
         web_url=raw_mr.web_url,
         updated_at=raw_mr.updated_at,
-        unresolved_discussion_count=_unresolved_discussion_count(raw_mr),
         approvals_given=approvals_given,
         approvals_required=approvals_required,
-        pipeline_status=_pipeline_status(raw_mr),
         lines_added=lines_added,
         lines_removed=lines_removed,
     )
@@ -113,17 +106,32 @@ def _project_from_references(raw_mr: Any) -> str:
     return raw_mr.references["full"].rsplit("!", 1)[0]
 
 
-def _map_all(raw_mrs: Any, project_of: Any = _project_from_references) -> list[MergeRequest]:
-    """Map raw MRs to domain entities, stopping early if the fetch is cancelled.
+_ENRICHMENT_BATCH_SIZE = 8
 
-    `project_of` derives each MR's project; defaults to reading it off the MR
-    itself for scopes (group/global) that don't already know it.
+
+def _batched(items: list[Any], size: int) -> list[list[Any]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _map_all(raw_mrs: Any, project_of: Any = _project_from_references) -> list[MergeRequest]:
+    """Map raw MRs to domain entities, enriching `_ENRICHMENT_BATCH_SIZE` at a
+    time on a thread pool so the 2 blocking enrichment calls per MR
+    (approvals, diff line stats) overlap instead of running one MR fully
+    before starting the next.
+
+    Cancellation is only checked *between* batches: threads already started
+    for the current batch always finish (there's no cheap way to abort a
+    blocking HTTP call mid-flight), but no new batch is started once
+    cancelled.
     """
     merge_requests = []
-    for raw_mr in raw_mrs:
-        if _quit_requested():
-            break
-        merge_requests.append(_to_domain(raw_mr, project_of(raw_mr)))
+    with ThreadPoolExecutor(max_workers=_ENRICHMENT_BATCH_SIZE) as pool:
+        for batch in _batched(list(raw_mrs), _ENRICHMENT_BATCH_SIZE):
+            if _quit_requested():
+                break
+            merge_requests.extend(
+                pool.map(lambda raw_mr: _to_domain(raw_mr, project_of(raw_mr)), batch)
+            )
     return merge_requests
 
 
@@ -214,4 +222,5 @@ class GitlabMergeRequestGateway:
             description=raw_mr.description or "",
             discussions=_discussions(raw_mr),
             diff=_diff_text(raw_mr),
+            pipeline_status=_pipeline_status(raw_mr),
         )
