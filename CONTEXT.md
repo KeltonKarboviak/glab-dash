@@ -53,3 +53,37 @@ file field.
 
 The fixed-priority process of trying each credential source in order (glab
 CLI config → `GITLAB_TOKEN` → own config file) until one yields a token.
+
+## Enrichment
+
+The set of merge request fields not present on GitLab's MR-list response
+and requiring additional API calls to obtain: approvals (given/required),
+diff stats (additions/deletions), pipeline status, unresolved discussion
+count. Distinct from list fields (title, state, author, assignee, labels),
+which arrive on the initial list fetch.
+
+## Boot
+
+The app's startup sequence, from process start to a section's merge
+requests being visible on screen. Ends at first paint, not at full
+enrichment.
+
+## First paint
+
+The moment a section's merge request list is rendered with list fields
+populated. Enrichment fields may still be loading; first paint does not
+wait for them.
+
+## Progressive enrichment
+
+Rendering first paint immediately with list fields only, then filling in
+each merge request's enrichment fields asynchronously as they arrive,
+without blocking or re-rendering the whole list.
+
+## Warm-start cache
+
+A persisted copy of a previous boot's enriched merge request data, used to
+render a subsequent boot's first paint already enriched (possibly stale),
+while a fresh fetch refreshes it in the background. Distinct from
+progressive enrichment, which has no prior data to show and always starts
+from list fields only.
