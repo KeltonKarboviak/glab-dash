@@ -25,7 +25,17 @@ def test_render_mr_row_builds_extended_title_block() -> None:
     state_icon, extended_title, _labels, _updated_at = render_mr_row(_make_mr())
 
     assert state_icon == "●"
-    assert extended_title == "group/project!42 by kelton\nfeature → main\nAdd feature"
+    assert extended_title == (
+        "group/project!42 by kelton\nfeature → main\nAdd feature\n+0/-0 · 0/0 approved"
+    )
+
+
+def test_render_mr_row_shows_diff_size_and_approvals() -> None:
+    _icon, extended_title, _labels, _updated_at = render_mr_row(
+        _make_mr(lines_added=12, lines_removed=3, approvals_given=1, approvals_required=2)
+    )
+
+    assert "+12/-3 · 1/2 approved" in extended_title
 
 
 def test_render_mr_row_joins_labels() -> None:

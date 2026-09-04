@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import gitlab
 import pytest
@@ -9,6 +9,7 @@ from textual.worker import active_worker
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
 from glab_dash.domain.merge_request import SectionNotFoundError
+from glab_dash.infrastructure import gitlab_gateway
 from glab_dash.infrastructure.gitlab_gateway import (
     GITLAB_COM_URL,
     GitlabMergeRequestGateway,
@@ -18,13 +19,12 @@ from glab_dash.infrastructure.gitlab_gateway import (
 
 def make_raw_mr(
     discussions: Sequence[bool] = (),
-    approved_by: Sequence[dict[str, str]] = (),
-    approvals_required: int = 0,
     pipeline_statuses: Sequence[str] = (),
     diffs: Sequence[str] = (),
     **overrides: object,
 ) -> SimpleNamespace:
     defaults = {
+        "id": 42,
         "iid": 42,
         "title": "Add feature",
         "author": {"username": "octocat"},
@@ -40,11 +40,6 @@ def make_raw_mr(
                 SimpleNamespace(resolved=resolved) for resolved in discussions
             ]
         ),
-        "approvals": SimpleNamespace(
-            get=lambda: SimpleNamespace(
-                approved_by=list(approved_by), approvals_required=approvals_required
-            )
-        ),
         "pipelines": SimpleNamespace(
             list=lambda get_all=True: [
                 SimpleNamespace(status=status) for status in pipeline_statuses
@@ -54,6 +49,55 @@ def make_raw_mr(
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
+
+
+class FakeGraphQLResponse:
+    """Stands in for `requests.post(...)`'s return value.
+
+    `nodes_by_alias` mirrors the real response shape: one key per aliased
+    `project(fullPath: ...)` sub-query (e.g. `p0`), each holding that
+    project's `mergeRequests.nodes`.
+    """
+
+    def __init__(self, nodes_by_alias: dict[str, list[dict[str, object]]]) -> None:
+        self._nodes_by_alias = nodes_by_alias
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict[str, object]:
+        return {
+            "data": {
+                alias: {"mergeRequests": {"nodes": nodes}}
+                for alias, nodes in self._nodes_by_alias.items()
+            }
+        }
+
+
+def enrichment_node(
+    iid: int,
+    approved_by: Sequence[str] = (),
+    approvals_left: int = 0,
+    additions: int = 0,
+    deletions: int = 0,
+) -> dict[str, object]:
+    """A GraphQL `mergeRequests.nodes[]` entry for the MR with `iid`."""
+    return {
+        "iid": str(iid),
+        "approvedBy": {"nodes": [{"username": username} for username in approved_by]},
+        "approvalsLeft": approvals_left,
+        "diffStatsSummary": {"additions": additions, "deletions": deletions},
+    }
+
+
+@pytest.fixture(autouse=True)
+def _no_enrichment_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every gateway list call fetches enrichment via one GraphQL POST.
+
+    Stub it to return nothing unless a test overrides `requests.post` itself
+    to assert on the request or return specific enrichment.
+    """
+    monkeypatch.setattr(gitlab_gateway.requests, "post", lambda *a, **k: FakeGraphQLResponse({}))
 
 
 class FakeMergeRequestManager:
@@ -105,6 +149,8 @@ class FakeGitlabClient:
         self.projects = FakeProjectManager(projects_by_path or {})
         self.groups = FakeGroupManager(groups_by_path or {})
         self.mergerequests = FakeMergeRequestManager(global_raw_mrs or [])
+        self.url = GITLAB_COM_URL
+        self.private_token = "secret"
 
 
 def test_lists_and_maps_a_projects_merge_requests_into_domain_entities() -> None:
@@ -129,25 +175,27 @@ def test_lists_and_maps_a_projects_merge_requests_into_domain_entities() -> None
     assert mr.assignee is None
 
 
-def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
-    """Regression: the TUI hung on quit because fetches kept enriching every MR."""
+def test_skips_the_enrichment_call_entirely_when_already_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the TUI hung on quit because fetches kept enriching every MR.
+
+    Enrichment is now one batched GraphQL call for the whole list rather than
+    N per-MR REST calls, so there's no "stop partway through enriching" --
+    cancellation just skips issuing that call at all.
+    """
 
     class FakeCancellableWorker:
-        is_cancelled = False
+        is_cancelled = True
 
-    worker = FakeCancellableWorker()
-    token = active_worker.set(worker)
+    token = active_worker.set(FakeCancellableWorker())
 
-    def cancel_after_first_discussions_call(get_all: bool = True) -> list[SimpleNamespace]:
-        worker.is_cancelled = True
-        return []
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("GraphQL enrichment should not run once cancelled")
 
-    cancelling_raw_mr = make_raw_mr(iid=1)
-    cancelling_raw_mr.discussions.list = cancel_after_first_discussions_call
-    untouched_raw_mr = make_raw_mr(iid=2)
-    client = FakeGitlabClient(
-        {"group/project": FakeProject([cancelling_raw_mr, untouched_raw_mr])}
-    )
+    monkeypatch.setattr(gitlab_gateway.requests, "post", fail_if_called)
+
+    client = FakeGitlabClient({"group/project": FakeProject([make_raw_mr()])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
     try:
@@ -155,22 +203,20 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
     finally:
         active_worker.reset(token)
 
-    assert len(result) == 1
-    assert result[0].iid == 1
+    assert result == []
 
 
-def test_unresolved_discussion_count_excludes_resolved_discussions() -> None:
-    raw_mr = make_raw_mr(discussions=[True, False, False])
-    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
-    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
-
-    result = gateway.list_project_merge_requests("group/project")
-
-    assert result[0].unresolved_discussion_count == 2
-
-
-def test_approvals_reflect_approved_by_and_required_count() -> None:
-    raw_mr = make_raw_mr(approved_by=[{"username": "octocat"}], approvals_required=2)
+def test_approvals_reflect_approved_by_and_approvals_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_mr = make_raw_mr(iid=7)
+    monkeypatch.setattr(
+        gitlab_gateway.requests,
+        "post",
+        lambda *a, **k: FakeGraphQLResponse(
+            {"p0": [enrichment_node(7, approved_by=["octocat"], approvals_left=1)]}
+        ),
+    )
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
@@ -180,39 +226,76 @@ def test_approvals_reflect_approved_by_and_required_count() -> None:
     assert result[0].approvals_required == 2
 
 
-def test_pipeline_status_is_the_latest_pipelines_status() -> None:
-    raw_mr = make_raw_mr(pipeline_statuses=["success", "failed"])
+def test_line_stats_come_from_the_graphql_diff_stats_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_mr = make_raw_mr(iid=7)
+    monkeypatch.setattr(
+        gitlab_gateway.requests,
+        "post",
+        lambda *a, **k: FakeGraphQLResponse({"p0": [enrichment_node(7, additions=12, deletions=3)]}),
+    )
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
     result = gateway.list_project_merge_requests("group/project")
 
-    assert result[0].pipeline_status == "success"
+    assert result[0].lines_added == 12
+    assert result[0].lines_removed == 3
 
 
-def test_pipeline_status_is_none_when_there_are_no_pipelines() -> None:
-    raw_mr = make_raw_mr(pipeline_statuses=[])
+def test_enrichment_defaults_to_zero_when_graphql_omits_a_merge_request() -> None:
+    """The default GraphQL stub returns no nodes; enrichment should degrade
+
+    to zero rather than raising a KeyError.
+    """
+    raw_mr = make_raw_mr(iid=7)
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
     result = gateway.list_project_merge_requests("group/project")
 
-    assert result[0].pipeline_status is None
+    assert result[0].approvals_given == 0
+    assert result[0].approvals_required == 0
+    assert result[0].lines_added == 0
+    assert result[0].lines_removed == 0
 
 
-def test_line_stats_sum_added_and_removed_lines_across_files_diffs() -> None:
-    diffs = [
-        "@@ -1,2 +1,3 @@\n-old line\n+++ b/file\n+new line 1\n+new line 2\n",
-        "@@ -1,1 +1,1 @@\n--- a/other\n-removed line\n",
-    ]
-    raw_mr = make_raw_mr(diffs=diffs)
-    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+def test_enrichment_call_batches_every_project_into_one_aliased_graphql_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A group section spans multiple projects; enrichment should still be a
+
+    single HTTP request, with one aliased `project(fullPath: ...)` sub-query
+    per distinct project rather than one request per project.
+    """
+    mr_in_a = make_raw_mr(iid=1, references={"full": "team/a!1"})
+    mr_in_b = make_raw_mr(iid=2, references={"full": "team/b!2"})
+    captured: dict[str, Any] = {}
+
+    def fake_post(
+        url: str, json: dict[str, object], headers: dict[str, str], **_: object
+    ) -> FakeGraphQLResponse:
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return FakeGraphQLResponse({})
+
+    monkeypatch.setattr(gitlab_gateway.requests, "post", fake_post)
+    client = FakeGitlabClient(groups_by_path={"team": FakeGroup([mr_in_a, mr_in_b])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    result = gateway.list_project_merge_requests("group/project")
+    gateway.list_group_merge_requests("team")
 
-    assert result[0].lines_added == 2
-    assert result[0].lines_removed == 2
+    assert captured["url"] == f"{GITLAB_COM_URL}/api/graphql"
+    assert captured["headers"] == {"Authorization": "Bearer secret"}
+    assert captured["json"]["variables"] == {
+        "path0": "team/a",
+        "iids0": ["1"],
+        "path1": "team/b",
+        "iids1": ["2"],
+    }
+    assert captured["json"]["query"].count("project(fullPath:") == 2
 
 
 def test_maps_assignee_username_when_present() -> None:
@@ -257,52 +340,23 @@ def test_lists_and_maps_every_visible_merge_request_deriving_project_from_refere
     assert result[0].project == "team/project"
 
 
-def _make_bare_raw_mr(**overrides: object) -> SimpleNamespace:
-    """A group/global-scoped merge request as GitLab actually returns it.
-
-    Real `GroupMergeRequest`/`MergeRequest` objects have no `approvals`,
-    `pipelines`, `discussions`, or `changes` manager -- only `ProjectMergeRequest`
-    does. `make_raw_mr()` stubs those managers on every fixture, which hid this
-    shape from tests.
-    """
-    raw_mr = make_raw_mr(**overrides)
-    for missing_attr in ("approvals", "pipelines", "discussions", "changes"):
-        delattr(raw_mr, missing_attr)
-    return raw_mr
-
-
 def test_lists_a_groups_merge_requests_without_project_only_managers() -> None:
-    raw_mr = _make_bare_raw_mr(references={"full": "team/project!42"})
+    """GraphQL enrichment keys off `.id` alone, so group/global-scoped MRs
+
+    (GitLab's bare `GroupMergeRequest`/`MergeRequest`, which have no
+    `approvals`/`pipelines`/`discussions`/`changes` manager) enrich the same
+    way a `ProjectMergeRequest` does -- no REST manager to be missing.
+    """
+    raw_mr = make_raw_mr(id=99, references={"full": "team/project!42"})
+    for missing_attr in ("pipelines", "discussions", "changes"):
+        delattr(raw_mr, missing_attr)
     client = FakeGitlabClient(groups_by_path={"team": FakeGroup([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
     result = gateway.list_group_merge_requests("team")
 
     assert len(result) == 1
-    mr = result[0]
-    assert mr.approvals_given == 0
-    assert mr.approvals_required == 0
-    assert mr.pipeline_status is None
-    assert mr.unresolved_discussion_count == 0
-    assert mr.lines_added == 0
-    assert mr.lines_removed == 0
-
-
-def test_lists_global_merge_requests_without_project_only_managers() -> None:
-    raw_mr = _make_bare_raw_mr(references={"full": "team/project!42"})
-    client = FakeGitlabClient(global_raw_mrs=[raw_mr])
-    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
-
-    result = gateway.list_global_merge_requests()
-
-    assert len(result) == 1
-    mr = result[0]
-    assert mr.approvals_given == 0
-    assert mr.approvals_required == 0
-    assert mr.pipeline_status is None
-    assert mr.unresolved_discussion_count == 0
-    assert mr.lines_added == 0
-    assert mr.lines_removed == 0
+    assert result[0].project == "team/project"
 
 
 def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users() -> None:
@@ -389,6 +443,7 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
         changes=lambda: {
             "changes": [{"old_path": "a.py", "new_path": "a.py", "diff": "+new line\n"}]
         },
+        pipelines=SimpleNamespace(list=lambda get_all=True: [SimpleNamespace(status="success")]),
     )
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
@@ -401,6 +456,7 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
     assert [note.body for note in detail.discussions[0].notes] == ["Looks good", "Agreed"]
     assert "diff --git a/a.py b/a.py" in detail.diff
     assert "+new line" in detail.diff
+    assert detail.pipeline_status == "success"
 
 
 class RaisingManager:

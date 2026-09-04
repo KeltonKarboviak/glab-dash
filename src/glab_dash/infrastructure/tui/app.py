@@ -184,7 +184,10 @@ class GlabDashApp(App):
         )
 
     def _render_preview(self, detail: MergeRequestDetail) -> None:
-        text = Text(detail.description or "(no description)")
+        text = Text()
+        text.append("Pipeline: ", style="bold")
+        text.append(f"{detail.pipeline_status or '-'}\n\n")
+        text.append(detail.description or "(no description)")
         text.append("\n\n")
         for discussion in detail.discussions:
             for note in discussion.notes:
