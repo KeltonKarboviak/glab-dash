@@ -19,6 +19,7 @@ dev = [
     "pytest-textual-snapshot>=1.0.0",
     "pytest-asyncio>=1.4.0",
     "ty>=0.0.76",
+    "httpx>=0.28.1",
 ]
 
 [build-system]
