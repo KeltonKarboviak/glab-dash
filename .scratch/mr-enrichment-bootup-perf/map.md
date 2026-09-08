@@ -34,15 +34,14 @@ Prototype E doesn't clear (a)'s bar.
 - (grilling session, no ticket) Enrichment updates rows as each chunk/batch lands (streamed), not in one batch at the end — that's the reason progressive enrichment is the destination.
 - (grilling session, no ticket) Fact: `DataTable.add_row` at `app.py:225` never passes a `key=`, so no stable row identity exists today for routing an enrichment result back to its row under sort/filter. Needs adding (e.g. `key=f"{mr.project}#{mr.iid}"`) as part of whichever ticket implements the merge-in-place update.
 - (grilling session, no ticket) Warm-start cache stays out of scope for this batch of tickets — confirmed separate, later fog patch; not to be reached for as a stopgap during progressive-enrichment work.
+- [Pending-enrichment domain model](issues/01-pending-enrichment-domain-model.md) — `MergeRequest` gets two independent `Pending | <Value>` union fields (`approvals: Pending | Approvals`, `line_stats: Pending | LineStats`) replacing the four scalar fields, not one bundled union and not `int | None` — approvals and diff stats resolve on different timelines even within one GraphQL query, so each must update independently.
+- [Pending-enrichment loading-state prototype](issues/02-pending-enrichment-loading-state-prototype.md) — animated spinner (braille frames, ticking every 100ms via `set_interval`/`update_cell_at`, only on cells still `Pending`) beats a static placeholder or blank cell.
 
 ## Not yet specified
 
 - Warm-start cache design: invalidation, staleness display, storage
   location — deferred until the boot-to-first-paint destination above is
   chosen and built.
-- Implementation shape for merging streamed enrichment chunks into
-  already-rendered rows (the `table.update_cell(row_key, ...)` mechanics,
-  chunk-to-row routing) — blocked on [Pending-enrichment domain model](issues/01-pending-enrichment-domain-model.md) settling what "pending" looks like first.
 
 ## Out of scope
 
