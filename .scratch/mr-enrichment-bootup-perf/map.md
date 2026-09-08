@@ -28,20 +28,26 @@ Prototype E doesn't clear (a)'s bar.
 ## Decisions so far
 
 - (charting session, no ticket) "Bootup ≤1s" means first paint (list fields only); progressive enrichment after first paint is accepted UX; warm-start cache is in scope as a later lever, layered on after cold-boot-to-first-paint is solved.
+- (grilling session, no ticket) Prototype E (single group-level GraphQL query) measured 3.88-4.93s live — still 3.9-4.9x over the ≤1s bar. Confirmed: the floor is GitLab computing `diffStatsSummary`/approvals per MR server-side, not round-trip count or client concurrency (see `docs/prototypes/2026-09-04-mr-enrichment-perf-prototypes.md`). Destination (b), progressive enrichment, is now locked in; option (a) is closed out.
+- (grilling session, no ticket) Progressive enrichment scope is exactly `{approvals, diff_stats}` — `pipeline_status`/`unresolved_discussion_count` stay on the existing on-demand detail-fetch path, unwidened.
+- (grilling session, no ticket) Mechanism: a second per-section Textual worker (e.g. `f"section-{index}-enrich"`), started after the first-paint worker completes, reusing the existing `Worker.StateChanged`/`_tables_by_worker_name` pattern in `app.py` rather than a new concurrency primitive.
+- (grilling session, no ticket) Enrichment updates rows as each chunk/batch lands (streamed), not in one batch at the end — that's the reason progressive enrichment is the destination.
+- (grilling session, no ticket) Fact: `DataTable.add_row` at `app.py:225` never passes a `key=`, so no stable row identity exists today for routing an enrichment result back to its row under sort/filter. Needs adding (e.g. `key=f"{mr.project}#{mr.iid}"`) as part of whichever ticket implements the merge-in-place update.
+- (grilling session, no ticket) Warm-start cache stays out of scope for this batch of tickets — confirmed separate, later fog patch; not to be reached for as a stopgap during progressive-enrichment work.
 
 ## Not yet specified
 
-- If Prototype E succeeds: how the single-query fetch replaces the current
-  gateway (REST list + GraphQL enrichment) — implementation shape,
-  pagination strategy for large groups, migration of existing tests.
-- If Prototype E doesn't clear the bar: the progressive-enrichment
-  architecture itself — UI loading-state model for rows pending
-  enrichment, how/when enrichment results merge into already-rendered
-  rows, error handling for partial enrichment failures, retry/backoff.
 - Warm-start cache design: invalidation, staleness display, storage
   location — deferred until the boot-to-first-paint destination above is
   chosen and built.
+- Implementation shape for merging streamed enrichment chunks into
+  already-rendered rows (the `table.update_cell(row_key, ...)` mechanics,
+  chunk-to-row routing) — blocked on [Pending-enrichment domain model](issues/01-pending-enrichment-domain-model.md) settling what "pending" looks like first.
 
 ## Out of scope
 
-(none yet)
+- Single group-level GraphQL query as the ≤1s solution (destination (a)) —
+  Prototype E measured 3.88-4.93s live, still 3.9-4.9x over the ≤1s bar;
+  the floor is GitLab's server-side per-MR computation of diff
+  stats/approvals, not round-trip count or client concurrency. See
+  `docs/prototypes/2026-09-04-mr-enrichment-perf-prototypes.md`.
