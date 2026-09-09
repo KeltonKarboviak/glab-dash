@@ -17,6 +17,7 @@ from glab_dash.domain.merge_request import (
     SectionNotFoundError,
 )
 from glab_dash.infrastructure.tui.app import SPINNER_FRAMES, GlabDashApp
+from glab_dash.infrastructure.tui.rows import FAILED_GLYPH
 
 
 class FakeGateway:
@@ -556,3 +557,102 @@ async def test_q_quits_promptly_while_enrichment_is_running() -> None:
 
         assert app.is_running is False
         assert elapsed < 1.0
+
+
+class FailingEnrichGateway:
+    """Fake gateway whose enrichment always raises, to exercise the retry/failure path."""
+
+    def __init__(self, merge_requests: list[MergeRequest]) -> None:
+        self._merge_requests = merge_requests
+        self.enrich_calls = 0
+
+    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
+        return self._merge_requests
+
+    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
+        return self._merge_requests
+
+    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
+        return self._merge_requests
+
+    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        raise AssertionError("not used in these tests")
+
+    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+        self.enrich_calls += 1
+        raise RuntimeError("gitlab api boom")
+
+
+async def test_persistent_enrichment_failure_shows_failed_glyph_after_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("glab_dash.infrastructure.tui.app.time.sleep", lambda _seconds: None)
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    gateway = FailingEnrichGateway([_make_mr()])
+    app = GlabDashApp(config, gateway)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        table = app.query_one("#table-0", DataTable)
+        row_key = "group/project#1"
+        assert table.get_cell(row_key, "approvals") == FAILED_GLYPH
+        assert table.get_cell(row_key, "lines") == FAILED_GLYPH
+        # 3 total attempts per MR: 1 initial + 2 retries.
+        assert gateway.enrich_calls == 3
+
+
+async def test_retry_keybind_only_re_enriches_failed_rows_in_the_active_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("glab_dash.infrastructure.tui.app.time.sleep", lambda _seconds: None)
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    ok_mr = _make_mr(iid=1)
+    failing_mr = _make_mr(iid=2)
+    gateway = FakeGateway([ok_mr])
+
+    original_enrich = gateway.enrich_merge_request
+
+    def enrich_merge_request(project: str, iid: int) -> tuple[Approvals, LineStats]:
+        if iid == failing_mr.iid:
+            raise RuntimeError("gitlab api boom")
+        return original_enrich(project, iid)
+
+    gateway.enrich_merge_request = enrich_merge_request  # type: ignore[method-assign]
+    gateway._merge_requests = [ok_mr, failing_mr]
+
+    app = GlabDashApp(config, gateway)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        table = app.query_one("#table-0", DataTable)
+        ok_row_key = "group/project#1"
+        failing_row_key = "group/project#2"
+        assert table.get_cell(ok_row_key, "approvals") == "0/0"
+        assert table.get_cell(failing_row_key, "approvals") == FAILED_GLYPH
+
+        gateway.enrich_calls = 0
+        call_counts: dict[int, int] = {}
+        original_retry_enrich = gateway.enrich_merge_request
+
+        def counting_enrich(project: str, iid: int) -> tuple[Approvals, LineStats]:
+            call_counts[iid] = call_counts.get(iid, 0) + 1
+            return original_retry_enrich(project, iid)
+
+        gateway.enrich_merge_request = counting_enrich  # type: ignore[method-assign]
+
+        await pilot.press("R")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert 1 not in call_counts
+        assert call_counts.get(2) == 3
+        assert table.get_cell(ok_row_key, "approvals") == "0/0"
+        assert table.get_cell(failing_row_key, "approvals") == FAILED_GLYPH

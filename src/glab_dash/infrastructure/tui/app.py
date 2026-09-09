@@ -1,5 +1,6 @@
 """Textual App shell: one tab per configured section, project tabs list MRs."""
 
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
@@ -20,6 +21,7 @@ from glab_dash.application.list_merge_requests import (
 from glab_dash.domain.config import Config, ConfigError, Section
 from glab_dash.domain.merge_request import (
     Approvals,
+    Failed,
     LineStats,
     MergeRequest,
     MergeRequestDetail,
@@ -66,19 +68,43 @@ def _enrichment_quit_requested() -> bool:
         return False
 
 
+ENRICHMENT_RETRY_BACKOFFS_SECONDS = (1.0, 3.0)
+
+
+def _enrich_merge_request_with_retry(
+    gateway: MergeRequestGateway,
+    mr: MergeRequest,
+    sleep: Callable[[float], None],
+) -> tuple[Approvals, LineStats] | None:
+    """Try `enrich_merge_request` up to 3 times total, backing off between retries."""
+    for attempt, backoff in enumerate((0.0, *ENRICHMENT_RETRY_BACKOFFS_SECONDS)):
+        if attempt:
+            sleep(backoff)
+        try:
+            return gateway.enrich_merge_request(mr.project, mr.iid)
+        except Exception:
+            log.exception("enrich_merge_request failed", project=mr.project, iid=mr.iid)
+    return None
+
+
 def _enrich_section(
     gateway: MergeRequestGateway,
     table_id: str,
     merge_requests: list[MergeRequest],
-    update_row: Callable[[str, str, Approvals, LineStats], None],
+    update_row: Callable[[str, str, Approvals | Failed, LineStats | Failed], None],
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     for mr in merge_requests:
         if _enrichment_quit_requested():
             break
-        approvals, line_stats = gateway.enrich_merge_request(mr.project, mr.iid)
+        result = _enrich_merge_request_with_retry(gateway, mr, sleep)
         if _enrichment_quit_requested():
             break
-        update_row(table_id, _row_key(mr), approvals, line_stats)
+        if result is None:
+            update_row(table_id, _row_key(mr), Failed(), Failed())
+        else:
+            approvals, line_stats = result
+            update_row(table_id, _row_key(mr), approvals, line_stats)
 
 
 class GlabDashApp(App):
@@ -93,6 +119,7 @@ class GlabDashApp(App):
         Binding("enter", "focus_preview", "Focus preview", show=False, priority=True),
         Binding("escape", "unfocus_preview", "Back to list", show=False, priority=True),
         Binding("r", "refresh", "Refresh", show=False),
+        Binding("R", "retry_failed_enrichment", "Retry failed", show=False),
         Binding("?", "toggle_help_panel", "Help", show=False),
         Binding("q", "quit", "Quit", show=False),
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
@@ -153,6 +180,32 @@ class GlabDashApp(App):
 
     def action_refresh(self) -> None:
         self._refresh_all_sections()
+
+    def action_retry_failed_enrichment(self) -> None:
+        table = self._active_table()
+        if table is None or table.id is None:
+            return
+        merge_requests_by_row_key = self._merge_requests_by_table_id.get(table.id, {})
+        failed_merge_requests = [
+            mr
+            for mr in merge_requests_by_row_key.values()
+            if isinstance(mr.approvals, Failed) or isinstance(mr.line_stats, Failed)
+        ]
+        if not failed_merge_requests:
+            return
+        index = table.id.removeprefix("table-")
+        self.run_worker(
+            partial(
+                _enrich_section,
+                self._gateway,
+                table.id,
+                failed_merge_requests,
+                partial(self.call_from_thread, self._update_enriched_row),
+            ),
+            name=f"section-{index}-enrich-retry",
+            thread=True,
+            exit_on_error=False,
+        )
 
     def _active_table(self) -> DataTable | None:
         tabbed_content = self.query_one(TabbedContent)
@@ -304,7 +357,11 @@ class GlabDashApp(App):
         )
 
     def _update_enriched_row(
-        self, table_id: str, row_key: str, approvals: Approvals, line_stats: LineStats
+        self,
+        table_id: str,
+        row_key: str,
+        approvals: Approvals | Failed,
+        line_stats: LineStats | Failed,
     ) -> None:
         merge_requests_by_row_key = self._merge_requests_by_table_id.get(table_id)
         if merge_requests_by_row_key is None or row_key not in merge_requests_by_row_key:
