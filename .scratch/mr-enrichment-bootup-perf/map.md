@@ -38,12 +38,11 @@ Prototype E doesn't clear (a)'s bar.
 - [Pending-enrichment loading-state prototype](issues/02-pending-enrichment-loading-state-prototype.md) — animated spinner (braille frames, ticking every 100ms via `set_interval`/`update_cell_at`, only on cells still `Pending`) beats a static placeholder or blank cell.
 - [Streamed-enrichment merge mechanics](issues/04-streamed-enrichment-merge-mechanics.md) — row key `f"{project}#{iid}"` on `add_row`/`_merge_requests_by_table_id`; new `enrich_merge_request` gateway method, worker-driven per-MR loop streaming via `call_from_thread` + two independent `update_cell` calls; new Approvals/Lines columns; one global spinner interval; enrich worker chained off first-paint SUCCESS, reusing its name each refresh for auto-cancellation.
 - [Enrichment failure retry policy](issues/03-enrichment-failure-retry-policy.md) — whole-chunk failures auto-retry 2x (1s/3s backoff) then flip to a bare `Failed` variant (added to both `approvals`/`line_stats` unions); a section-wide keybind manually retries only rows still `Failed`.
+- [Warm-start cache mechanics](issues/11-warm-start-cache-mechanics.md) — one JSON file per section under XDG cache dir, keyed by `project#iid`, enrichment fields only; read synchronously before first paint, written by the app layer (debounced, pruned each write); cache-miss on corruption/missing/version-mismatch; no TTL; new `Stale` cell state reuses the existing streamed merge path to resolve.
 
 ## Not yet specified
 
-- Warm-start cache design: invalidation, staleness display, storage
-  location — deferred until the boot-to-first-paint destination above is
-  chosen and built.
+(none — fog fully graduated into tickets/decisions above)
 
 ## Out of scope
 

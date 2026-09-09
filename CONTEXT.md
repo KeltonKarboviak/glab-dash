@@ -111,4 +111,17 @@ A persisted copy of a previous boot's enriched merge request data, used to
 render a subsequent boot's first paint already enriched (possibly stale),
 while a fresh fetch refreshes it in the background. Distinct from
 progressive enrichment, which has no prior data to show and always starts
-from list fields only.
+from list fields only. Stored as one JSON file per section, keyed by
+`project#iid`, holding only enrichment fields (list fields are always
+re-fetched fresh). Pruned on every write to drop entries for merge
+requests no longer present in the section's latest fetch.
+
+## Stale
+
+A merge request's enrichment field (approvals or line stats) shown from
+the warm-start cache at first paint, before the background fetch has
+confirmed or replaced it. Distinct from `Pending` (no value known yet) and
+`Failed` (fetch attempted and gave up) — `Stale` has a value, just an
+unconfirmed one. Resolves to a fresh value through the same per-MR
+streaming update path used for `Pending → resolved`, no separate
+mechanism.
