@@ -36,6 +36,7 @@ Prototype E doesn't clear (a)'s bar.
 - (grilling session, no ticket) Warm-start cache stays out of scope for this batch of tickets — confirmed separate, later fog patch; not to be reached for as a stopgap during progressive-enrichment work.
 - [Pending-enrichment domain model](issues/01-pending-enrichment-domain-model.md) — `MergeRequest` gets two independent `Pending | <Value>` union fields (`approvals: Pending | Approvals`, `line_stats: Pending | LineStats`) replacing the four scalar fields, not one bundled union and not `int | None` — approvals and diff stats resolve on different timelines even within one GraphQL query, so each must update independently.
 - [Pending-enrichment loading-state prototype](issues/02-pending-enrichment-loading-state-prototype.md) — animated spinner (braille frames, ticking every 100ms via `set_interval`/`update_cell_at`, only on cells still `Pending`) beats a static placeholder or blank cell.
+- [Enrichment failure retry policy](issues/03-enrichment-failure-retry-policy.md) — whole-chunk failures auto-retry 2x (1s/3s backoff) then flip to a bare `Failed` variant (added to both `approvals`/`line_stats` unions); a section-wide keybind manually retries only rows still `Failed`.
 
 ## Not yet specified
 
