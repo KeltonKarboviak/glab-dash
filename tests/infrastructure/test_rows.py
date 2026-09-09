@@ -1,8 +1,8 @@
 from dataclasses import replace
 
 from glab_dash.domain.config import MergeRequestState
-from glab_dash.domain.merge_request import MergeRequest
-from glab_dash.infrastructure.tui.rows import render_mr_row
+from glab_dash.domain.merge_request import Approvals, Failed, LineStats, MergeRequest, Pending
+from glab_dash.infrastructure.tui.rows import render_approvals, render_line_stats, render_mr_row
 
 
 def _make_mr(**overrides: object) -> MergeRequest:
@@ -52,3 +52,27 @@ def test_render_mr_row_maps_merged_and_closed_state_icons() -> None:
 
     assert merged_icon == "✓"
     assert closed_icon == "✗"
+
+
+def test_render_approvals_shows_spinner_frame_when_pending() -> None:
+    assert render_approvals(Pending(), frame="⠹") == "⠹"
+
+
+def test_render_approvals_shows_given_over_required_when_resolved() -> None:
+    assert render_approvals(Approvals(given=2, required=2), frame="⠹") == "2/2"
+
+
+def test_render_approvals_shows_fixed_glyph_when_failed() -> None:
+    assert render_approvals(Failed(), frame="⠹") == "⚠"
+
+
+def test_render_line_stats_shows_spinner_frame_when_pending() -> None:
+    assert render_line_stats(Pending(), frame="⠹") == "⠹"
+
+
+def test_render_line_stats_shows_added_and_removed_when_resolved() -> None:
+    assert render_line_stats(LineStats(added=34, removed=12), frame="⠹") == "+34/-12"
+
+
+def test_render_line_stats_shows_fixed_glyph_when_failed() -> None:
+    assert render_line_stats(Failed(), frame="⠹") == "⚠"
