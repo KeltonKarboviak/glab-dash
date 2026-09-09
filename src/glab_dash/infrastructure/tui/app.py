@@ -1,5 +1,7 @@
 """Textual App shell: one tab per configured section, project tabs list MRs."""
 
+from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 
 import structlog
@@ -7,15 +9,22 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
+from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
-from textual.worker import Worker, WorkerState
+from textual.worker import NoActiveWorker, Worker, WorkerState, get_current_worker
 
 from glab_dash.application.list_merge_requests import (
     MergeRequestGateway,
     list_merge_requests_for_section,
 )
 from glab_dash.domain.config import Config, ConfigError, Section
-from glab_dash.domain.merge_request import MergeRequest, MergeRequestDetail
+from glab_dash.domain.merge_request import (
+    Approvals,
+    LineStats,
+    MergeRequest,
+    MergeRequestDetail,
+    Pending,
+)
 from glab_dash.infrastructure.config import load_config, resolve_config_path
 from glab_dash.infrastructure.credentials import resolve_gitlab_token
 from glab_dash.infrastructure.gitlab_gateway import (
@@ -25,9 +34,16 @@ from glab_dash.infrastructure.gitlab_gateway import (
 )
 from glab_dash.infrastructure.logging import configure_logging
 from glab_dash.infrastructure.tui.diff import colorize_diff
-from glab_dash.infrastructure.tui.rows import MR_ROW_HEIGHT, render_mr_row
+from glab_dash.infrastructure.tui.rows import (
+    MR_ROW_HEIGHT,
+    render_approvals,
+    render_line_stats,
+    render_mr_row,
+)
 
 PREVIEW_WORKER_NAME = "preview-detail"
+SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+SPINNER_TICK_SECONDS = 0.1
 
 log = structlog.get_logger(__name__)
 
@@ -36,6 +52,31 @@ def _fetch_section_merge_requests(
     gateway: MergeRequestGateway, section: Section
 ) -> list[MergeRequest]:
     return list_merge_requests_for_section(gateway, section)
+
+
+def _row_key(mr: MergeRequest) -> str:
+    return f"{mr.project}#{mr.iid}"
+
+
+def _enrichment_quit_requested() -> bool:
+    """Whether the Textual worker running this enrichment has been cancelled."""
+    try:
+        return get_current_worker().is_cancelled
+    except NoActiveWorker:
+        return False
+
+
+def _enrich_section(
+    gateway: MergeRequestGateway,
+    table_id: str,
+    merge_requests: list[MergeRequest],
+    update_row: Callable[[str, str, Approvals, LineStats], None],
+) -> None:
+    for mr in merge_requests:
+        if _enrichment_quit_requested():
+            break
+        approvals, line_stats = gateway.enrich_merge_request(mr.project, mr.iid)
+        update_row(table_id, _row_key(mr), approvals, line_stats)
 
 
 class GlabDashApp(App):
@@ -61,9 +102,10 @@ class GlabDashApp(App):
         self._gateway = gateway
         self._tables_by_worker_name: dict[str, DataTable] = {}
         self._sections_by_worker_name: dict[str, Section] = {}
-        self._merge_requests_by_table_id: dict[str, list[MergeRequest]] = {}
+        self._merge_requests_by_table_id: dict[str, dict[str, MergeRequest]] = {}
         self._preview_visible = False
         self._preview_focused = False
+        self._spinner_frame = SPINNER_FRAMES[0]
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -79,12 +121,20 @@ class GlabDashApp(App):
         self.query_one("#preview-pane").display = False
         for index, section in enumerate(self._config.sections):
             table = self.query_one(f"#table-{index}", DataTable)
-            table.add_columns("", "Merge Request", "Labels", "Updated")
+            table.add_columns(
+                "",
+                "Merge Request",
+                "Labels",
+                "Updated",
+                ("Approvals", "approvals"),
+                ("Lines", "lines"),
+            )
             worker_name = f"section-{index}"
             self._tables_by_worker_name[worker_name] = table
             self._sections_by_worker_name[worker_name] = section
             self._fetch_section(worker_name, section)
         self.set_interval(self._config.refresh_interval, self._refresh_all_sections)
+        self.set_interval(SPINNER_TICK_SECONDS, self._advance_spinner)
         log.info("tui mounted", section_count=len(self._config.sections))
 
     def _fetch_section(self, worker_name: str, section: Section) -> None:
@@ -164,10 +214,9 @@ class GlabDashApp(App):
         table = self._active_table()
         if table is None or table.row_count == 0 or table.id is None:
             return None
-        merge_requests = self._merge_requests_by_table_id.get(table.id, [])
-        if table.cursor_row >= len(merge_requests):
-            return None
-        return merge_requests[table.cursor_row]
+        merge_requests_by_row_key = self._merge_requests_by_table_id.get(table.id, {})
+        row_key, _ = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0))
+        return merge_requests_by_row_key.get(row_key.value)
 
     def _load_preview(self) -> None:
         merge_request = self._selected_merge_request()
@@ -218,19 +267,67 @@ class GlabDashApp(App):
         previous_cursor_row = table.cursor_row
         merge_requests = event.worker.result
         assert merge_requests is not None, "SUCCESS worker must have a result"
-        self._merge_requests_by_table_id[table.id] = merge_requests
+        self._merge_requests_by_table_id[table.id] = {_row_key(mr): mr for mr in merge_requests}
         table.clear()
         for mr in merge_requests:
             state_icon, extended_title, labels, updated_at = render_mr_row(mr)
-            table.add_row(state_icon, extended_title, labels, updated_at, height=MR_ROW_HEIGHT)
+            approvals_cell = render_approvals(mr.approvals, self._spinner_frame)
+            lines_cell = render_line_stats(mr.line_stats, self._spinner_frame)
+            table.add_row(
+                state_icon,
+                extended_title,
+                labels,
+                updated_at,
+                approvals_cell,
+                lines_cell,
+                height=MR_ROW_HEIGHT,
+                key=_row_key(mr),
+            )
         if table.row_count:
             table.move_cursor(row=min(previous_cursor_row, table.row_count - 1))
+        index = event.worker.name.removeprefix("section-")
+        self.run_worker(
+            partial(
+                _enrich_section,
+                self._gateway,
+                table.id,
+                merge_requests,
+                partial(self.call_from_thread, self._update_enriched_row),
+            ),
+            name=f"section-{index}-enrich",
+            thread=True,
+            exit_on_error=False,
+        )
+
+    def _update_enriched_row(
+        self, table_id: str, row_key: str, approvals: Approvals, line_stats: LineStats
+    ) -> None:
+        merge_requests_by_row_key = self._merge_requests_by_table_id.get(table_id)
+        if merge_requests_by_row_key is None or row_key not in merge_requests_by_row_key:
+            return
+        merge_requests_by_row_key[row_key] = replace(
+            merge_requests_by_row_key[row_key], approvals=approvals, line_stats=line_stats
+        )
+        table = self.query_one(f"#{table_id}", DataTable)
+        table.update_cell(row_key, "approvals", render_approvals(approvals, self._spinner_frame))
+        table.update_cell(row_key, "lines", render_line_stats(line_stats, self._spinner_frame))
+
+    def _advance_spinner(self) -> None:
+        frame_index = (SPINNER_FRAMES.index(self._spinner_frame) + 1) % len(SPINNER_FRAMES)
+        self._spinner_frame = SPINNER_FRAMES[frame_index]
+        for table_id, merge_requests_by_row_key in self._merge_requests_by_table_id.items():
+            table = self.query_one(f"#{table_id}", DataTable)
+            for row_key, mr in merge_requests_by_row_key.items():
+                if isinstance(mr.approvals, Pending):
+                    table.update_cell(row_key, "approvals", self._spinner_frame)
+                if isinstance(mr.line_stats, Pending):
+                    table.update_cell(row_key, "lines", self._spinner_frame)
 
     def _render_section_error(self, worker_name: str, error: BaseException | None) -> None:
         table = self._tables_by_worker_name.get(worker_name)
         if table is None:
             return
-        self._merge_requests_by_table_id[table.id] = []
+        self._merge_requests_by_table_id[table.id] = {}
         table.clear()
         table.add_row("", f"⚠ {error}", "", "")
 

@@ -15,7 +15,7 @@ from glab_dash.domain.merge_request import (
     MergeRequestDetail,
     SectionNotFoundError,
 )
-from glab_dash.infrastructure.tui.app import GlabDashApp
+from glab_dash.infrastructure.tui.app import SPINNER_FRAMES, GlabDashApp
 
 
 class FakeGateway:
@@ -346,7 +346,7 @@ async def test_refresh_runs_through_run_worker_without_blocking(
         await app.workers.wait_for_complete()
         await pilot.pause()
 
-        assert calls == [True]
+        assert calls and all(calls)
 
 
 async def test_automatic_refresh_is_scheduled_at_the_configured_interval(
@@ -380,6 +380,84 @@ async def test_q_quits_the_app() -> None:
     async with app.run_test() as pilot:
         await pilot.press("q")
         assert app.is_running is False
+
+
+async def test_first_paint_success_starts_enrichment_and_resolves_cells(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    gateway = FakeGateway([_make_mr()])
+    app = GlabDashApp(config, gateway)
+
+    worker_names = []
+    original_run_worker = app.run_worker
+
+    def tracking_run_worker(*args, **kwargs):
+        worker_names.append(kwargs.get("name"))
+        return original_run_worker(*args, **kwargs)
+
+    monkeypatch.setattr(app, "run_worker", tracking_run_worker)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert "section-0-enrich" in worker_names
+        table = app.query_one("#table-0", DataTable)
+        row_key = "group/project#1"
+        assert table.get_cell(row_key, "approvals") == "0/0"
+        assert table.get_cell(row_key, "lines") == "+0/-0"
+
+
+async def test_approvals_cell_resolves_independently_of_lines_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    gateway = FakeGateway([_make_mr()])
+    app = GlabDashApp(config, gateway)
+
+    calls: list[tuple[str, object, object]] = []
+    original_update_cell = DataTable.update_cell
+
+    def tracking_update_cell(
+        self: DataTable, row_key: str, column_key: str, value: object, *, update_width: bool = False
+    ) -> None:
+        if column_key == "approvals" and value == "0/0":
+            calls.append((column_key, value, self.get_cell(row_key, "lines")))
+        else:
+            calls.append((column_key, value, None))
+        return original_update_cell(self, row_key, column_key, value, update_width=update_width)
+
+    monkeypatch.setattr(DataTable, "update_cell", tracking_update_cell)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        approvals_resolution = ("approvals", "0/0")
+        lines_resolution = ("lines", "+0/-0")
+        approvals_resolved_index = next(
+            i
+            for i, (column_key, value, _) in enumerate(calls)
+            if (column_key, value) == approvals_resolution
+        )
+        lines_value_when_approvals_resolved = str(calls[approvals_resolved_index][2])
+        assert lines_value_when_approvals_resolved in SPINNER_FRAMES
+        lines_resolved_index = next(
+            i
+            for i, (column_key, value, _) in enumerate(calls)
+            if (column_key, value) == lines_resolution
+        )
+        assert lines_resolved_index > approvals_resolved_index
+
+        table = app.query_one("#table-0", DataTable)
+        row_key = "group/project#1"
+        assert table.get_cell(row_key, "approvals") == "0/0"
+        assert table.get_cell(row_key, "lines") == "+0/-0"
 
 
 async def test_question_mark_toggles_the_help_panel() -> None:
