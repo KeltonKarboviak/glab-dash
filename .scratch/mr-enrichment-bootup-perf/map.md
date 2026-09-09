@@ -39,6 +39,7 @@ Prototype E doesn't clear (a)'s bar.
 - [Streamed-enrichment merge mechanics](issues/04-streamed-enrichment-merge-mechanics.md) — row key `f"{project}#{iid}"` on `add_row`/`_merge_requests_by_table_id`; new `enrich_merge_request` gateway method, worker-driven per-MR loop streaming via `call_from_thread` + two independent `update_cell` calls; new Approvals/Lines columns; one global spinner interval; enrich worker chained off first-paint SUCCESS, reusing its name each refresh for auto-cancellation.
 - [Enrichment failure retry policy](issues/03-enrichment-failure-retry-policy.md) — whole-chunk failures auto-retry 2x (1s/3s backoff) then flip to a bare `Failed` variant (added to both `approvals`/`line_stats` unions); a section-wide keybind manually retries only rows still `Failed`.
 - [Warm-start cache mechanics](issues/11-warm-start-cache-mechanics.md) — one JSON file per section under XDG cache dir, keyed by `project#iid`, enrichment fields only; read synchronously before first paint, written by the app layer (debounced, pruned each write); cache-miss on corruption/missing/version-mismatch; no TTL; new `Stale` cell state reuses the existing streamed merge path to resolve.
+- [Warm-start staleness display prototype](issues/12-warm-start-staleness-display-prototype.md) — `Stale` cell renders as the resolved value text dimmed (`rich.text.Text(..., style="dim")`), no glyph or italics; distinct from spinner (`Pending`), `⚠` (`Failed`), and normal-weight resolved text.
 
 ## Not yet specified
 
