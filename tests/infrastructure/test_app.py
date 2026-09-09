@@ -1,3 +1,4 @@
+import time
 from typing import cast
 
 import pytest
@@ -60,6 +61,39 @@ class FailingGateway:
 
     def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
         raise AssertionError("not used in these tests")
+
+
+class SlowCycleGateway:
+    """Fake gateway whose enrichment is slow and tags results with the fetch cycle.
+
+    Lets tests catch a refresh mid-enrichment and assert only the latest
+    cycle's values ever land on the table.
+    """
+
+    def __init__(self, merge_requests: list[MergeRequest], delay: float) -> None:
+        self._merge_requests = merge_requests
+        self._delay = delay
+        self._cycle = 0
+        self.enrich_calls = 0
+
+    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
+        self._cycle += 1
+        return self._merge_requests
+
+    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
+        return self._merge_requests
+
+    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
+        return self._merge_requests
+
+    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        raise AssertionError("not used in these tests")
+
+    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+        self.enrich_calls += 1
+        time.sleep(self._delay)
+        cycle = self._cycle
+        return Approvals(given=cycle, required=cycle), LineStats(added=cycle, removed=cycle)
 
 
 def _make_mr(iid: int = 1) -> MergeRequest:
@@ -474,3 +508,51 @@ async def test_question_mark_toggles_the_help_panel() -> None:
         await pilot.press("?")
         await pilot.pause()
         assert not app.screen.query("HelpPanel")
+
+
+async def test_refresh_cancels_in_flight_enrichment_and_lands_only_the_fresh_cycle() -> None:
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    merge_requests = [_make_mr(iid=i) for i in range(1, 6)]
+    gateway = SlowCycleGateway(merge_requests, delay=0.1)
+    app = GlabDashApp(config, gateway)
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.15)
+        table = app.query_one("#table-0", DataTable)
+        assert table.row_count == 5
+
+        await pilot.press("j")
+        assert table.cursor_row == 1
+
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause(0.2)
+
+        for mr in merge_requests:
+            row_key = f"group/project#{mr.iid}"
+            assert table.get_cell(row_key, "approvals") == "2/2"
+            assert table.get_cell(row_key, "lines") == "+2/-2"
+        # cycle 1's enrichment must have been cut off, not left to run to
+        # completion in the background: 2 full cycles of 5 rows would be 10.
+        assert gateway.enrich_calls < 2 * len(merge_requests)
+
+
+async def test_q_quits_promptly_while_enrichment_is_running() -> None:
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    merge_requests = [_make_mr(iid=i) for i in range(1, 6)]
+    gateway = SlowCycleGateway(merge_requests, delay=0.05)
+    app = GlabDashApp(config, gateway)
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.05)
+
+        started = time.monotonic()
+        await pilot.press("q")
+        elapsed = time.monotonic() - started
+
+        assert app.is_running is False
+        assert elapsed < 1.0

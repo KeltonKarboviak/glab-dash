@@ -76,6 +76,8 @@ def _enrich_section(
         if _enrichment_quit_requested():
             break
         approvals, line_stats = gateway.enrich_merge_request(mr.project, mr.iid)
+        if _enrichment_quit_requested():
+            break
         update_row(table_id, _row_key(mr), approvals, line_stats)
 
 
@@ -295,6 +297,8 @@ class GlabDashApp(App):
                 partial(self.call_from_thread, self._update_enriched_row),
             ),
             name=f"section-{index}-enrich",
+            group=f"section-{index}-enrich",
+            exclusive=True,
             thread=True,
             exit_on_error=False,
         )
