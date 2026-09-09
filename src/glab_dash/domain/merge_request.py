@@ -30,6 +30,28 @@ class MergeRequestDetail:
 
 
 @dataclass(frozen=True)
+class Pending:
+    """Enrichment for this field hasn't been fetched yet."""
+
+
+@dataclass(frozen=True)
+class Approvals:
+    given: int
+    required: int
+
+
+@dataclass(frozen=True)
+class LineStats:
+    added: int
+    removed: int
+
+
+@dataclass(frozen=True)
+class Failed:
+    """Enrichment for this field was attempted but failed."""
+
+
+@dataclass(frozen=True)
 class MergeRequest:
     iid: int
     project: str
@@ -43,11 +65,9 @@ class MergeRequest:
     assignee: str | None = None
     labels: list[str] = field(default_factory=list)
     unresolved_discussion_count: int = 0
-    approvals_given: int = 0
-    approvals_required: int = 0
+    approvals: Pending | Approvals | Failed = Pending()
     pipeline_status: str | None = None
-    lines_added: int = 0
-    lines_removed: int = 0
+    line_stats: Pending | LineStats | Failed = Pending()
 
 
 def filter_by_state(

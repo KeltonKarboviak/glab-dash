@@ -98,6 +98,13 @@ A merge request's diff-size enrichment: lines added and lines removed.
 Added/removed always arrive and update together as one unit, independently
 of Approvals — the two enrichment fields resolve on separate timelines.
 
+## Failed
+
+A merge request's enrichment field (approvals or line stats) that was
+attempted but could not be fetched. Distinct from `Pending` — a `Failed`
+field will not be retried automatically, whereas `Pending` means the fetch
+just hasn't completed yet.
+
 ## Warm-start cache
 
 A persisted copy of a previous boot's enriched merge request data, used to

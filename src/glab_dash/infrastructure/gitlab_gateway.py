@@ -7,8 +7,10 @@ from textual.worker import NoActiveWorker, get_current_worker
 
 from glab_dash.domain.config import MergeRequestState
 from glab_dash.domain.merge_request import (
+    Approvals,
     Discussion,
     DiscussionNote,
+    LineStats,
     MergeRequest,
     MergeRequestDetail,
     SectionNotFoundError,
@@ -38,11 +40,14 @@ def _unresolved_discussion_count(raw_mr: Any) -> int:
     return sum(1 for discussion in raw_mr.discussions.list(get_all=True) if not discussion.resolved)
 
 
-def _approvals(raw_mr: Any) -> tuple[int, int]:
+def _approvals(raw_mr: Any) -> Approvals:
+    # ponytail: bare-typed group/global MRs have no `approvals` manager, so this
+    # reports a fetched zero rather than Failed()/Pending() -- ticket 06 (gateway
+    # rework) should decide whether that's the right signal for those scopes.
     if not hasattr(raw_mr, "approvals"):
-        return 0, 0
+        return Approvals(given=0, required=0)
     approval = raw_mr.approvals.get()
-    return len(approval.approved_by), approval.approvals_required
+    return Approvals(given=len(approval.approved_by), required=approval.approvals_required)
 
 
 def _pipeline_status(raw_mr: Any) -> str | None:
@@ -52,9 +57,11 @@ def _pipeline_status(raw_mr: Any) -> str | None:
     return pipelines[0].status if pipelines else None
 
 
-def _line_stats(raw_mr: Any) -> tuple[int, int]:
+def _line_stats(raw_mr: Any) -> LineStats:
+    # ponytail: same ceiling as _approvals above -- no `changes` manager on
+    # bare-typed MRs, so this is a fetched zero, not a Failed()/Pending() signal.
     if not hasattr(raw_mr, "changes"):
-        return 0, 0
+        return LineStats(added=0, removed=0)
     added = removed = 0
     for change in raw_mr.changes().get("changes", []):
         for line in change.get("diff", "").splitlines():
@@ -62,13 +69,11 @@ def _line_stats(raw_mr: Any) -> tuple[int, int]:
                 added += 1
             elif line.startswith("-") and not line.startswith("---"):
                 removed += 1
-    return added, removed
+    return LineStats(added=added, removed=removed)
 
 
 def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
     assignee = getattr(raw_mr, "assignee", None)
-    approvals_given, approvals_required = _approvals(raw_mr)
-    lines_added, lines_removed = _line_stats(raw_mr)
     return MergeRequest(
         iid=raw_mr.iid,
         project=project,
@@ -82,11 +87,9 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
         web_url=raw_mr.web_url,
         updated_at=raw_mr.updated_at,
         unresolved_discussion_count=_unresolved_discussion_count(raw_mr),
-        approvals_given=approvals_given,
-        approvals_required=approvals_required,
+        approvals=_approvals(raw_mr),
         pipeline_status=_pipeline_status(raw_mr),
-        lines_added=lines_added,
-        lines_removed=lines_removed,
+        line_stats=_line_stats(raw_mr),
     )
 
 

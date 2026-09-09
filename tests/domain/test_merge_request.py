@@ -2,7 +2,11 @@ import pytest
 
 from glab_dash.domain.config import MergeRequestState
 from glab_dash.domain.merge_request import (
+    Approvals,
+    Failed,
+    LineStats,
     MergeRequest,
+    Pending,
     filter_by_assignee,
     filter_by_author,
     filter_by_labels,
@@ -124,3 +128,28 @@ def test_filter_by_labels_empty_returns_every_mr() -> None:
     result = filter_by_labels([both, one], [])
 
     assert result == [both, one]
+
+
+def test_merge_request_defaults_approvals_and_line_stats_to_pending() -> None:
+    mr = make_mr()
+
+    assert mr.approvals == Pending()
+    assert mr.line_stats == Pending()
+
+
+def test_pending_instances_are_equal() -> None:
+    assert Pending() == Pending()
+
+
+def test_approvals_equality_and_construction() -> None:
+    assert Approvals(given=1, required=2) == Approvals(given=1, required=2)
+    assert Approvals(given=1, required=2) != Approvals(given=2, required=2)
+
+
+def test_line_stats_equality_and_construction() -> None:
+    assert LineStats(added=3, removed=4) == LineStats(added=3, removed=4)
+    assert LineStats(added=3, removed=4) != LineStats(added=4, removed=4)
+
+
+def test_failed_instances_are_equal() -> None:
+    assert Failed() == Failed()

@@ -8,7 +8,7 @@ from textual.worker import active_worker
 
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
-from glab_dash.domain.merge_request import SectionNotFoundError
+from glab_dash.domain.merge_request import Approvals, LineStats, SectionNotFoundError
 from glab_dash.infrastructure.gitlab_gateway import (
     GITLAB_COM_URL,
     GitlabMergeRequestGateway,
@@ -176,8 +176,7 @@ def test_approvals_reflect_approved_by_and_required_count() -> None:
 
     result = gateway.list_project_merge_requests("group/project")
 
-    assert result[0].approvals_given == 1
-    assert result[0].approvals_required == 2
+    assert result[0].approvals == Approvals(given=1, required=2)
 
 
 def test_pipeline_status_is_the_latest_pipelines_status() -> None:
@@ -211,8 +210,7 @@ def test_line_stats_sum_added_and_removed_lines_across_files_diffs() -> None:
 
     result = gateway.list_project_merge_requests("group/project")
 
-    assert result[0].lines_added == 2
-    assert result[0].lines_removed == 2
+    assert result[0].line_stats == LineStats(added=2, removed=2)
 
 
 def test_maps_assignee_username_when_present() -> None:
@@ -280,12 +278,10 @@ def test_lists_a_groups_merge_requests_without_project_only_managers() -> None:
 
     assert len(result) == 1
     mr = result[0]
-    assert mr.approvals_given == 0
-    assert mr.approvals_required == 0
+    assert mr.approvals == Approvals(given=0, required=0)
     assert mr.pipeline_status is None
     assert mr.unresolved_discussion_count == 0
-    assert mr.lines_added == 0
-    assert mr.lines_removed == 0
+    assert mr.line_stats == LineStats(added=0, removed=0)
 
 
 def test_lists_global_merge_requests_without_project_only_managers() -> None:
@@ -297,12 +293,10 @@ def test_lists_global_merge_requests_without_project_only_managers() -> None:
 
     assert len(result) == 1
     mr = result[0]
-    assert mr.approvals_given == 0
-    assert mr.approvals_required == 0
+    assert mr.approvals == Approvals(given=0, required=0)
     assert mr.pipeline_status is None
     assert mr.unresolved_discussion_count == 0
-    assert mr.lines_added == 0
-    assert mr.lines_removed == 0
+    assert mr.line_stats == LineStats(added=0, removed=0)
 
 
 def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users() -> None:
