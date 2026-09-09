@@ -80,6 +80,24 @@ Rendering first paint immediately with list fields only, then filling in
 each merge request's enrichment fields asynchronously as they arrive,
 without blocking or re-rendering the whole list.
 
+## Pending
+
+A merge request's enrichment field (approvals or diff stats) not yet
+fetched. Distinct from a fetched zero — a merge request with `Pending`
+approvals has no known approval count yet, not zero approvals.
+
+## Approvals
+
+A merge request's approval enrichment: how many approvals it has (given)
+and how many it needs (required). Given/required always arrive and update
+together as one unit.
+
+## Line stats
+
+A merge request's diff-size enrichment: lines added and lines removed.
+Added/removed always arrive and update together as one unit, independently
+of Approvals — the two enrichment fields resolve on separate timelines.
+
 ## Warm-start cache
 
 A persisted copy of a previous boot's enriched merge request data, used to
