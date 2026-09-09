@@ -7,8 +7,10 @@ from textual.widgets import DataTable, Static, Tab, TabbedContent
 
 from glab_dash.domain.config import Config, MergeRequestState, Scope, Section
 from glab_dash.domain.merge_request import (
+    Approvals,
     Discussion,
     DiscussionNote,
+    LineStats,
     MergeRequest,
     MergeRequestDetail,
     SectionNotFoundError,
@@ -39,6 +41,9 @@ class FakeGateway:
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
         return self._detail
 
+    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+        return Approvals(given=0, required=0), LineStats(added=0, removed=0)
+
 
 class FailingGateway:
     def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
@@ -51,6 +56,9 @@ class FailingGateway:
         return []
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        raise AssertionError("not used in these tests")
+
+    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
         raise AssertionError("not used in these tests")
 
 

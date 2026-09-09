@@ -13,6 +13,7 @@ from glab_dash.domain.merge_request import (
     LineStats,
     MergeRequest,
     MergeRequestDetail,
+    Pending,
     SectionNotFoundError,
 )
 
@@ -41,11 +42,9 @@ def _unresolved_discussion_count(raw_mr: Any) -> int:
 
 
 def _approvals(raw_mr: Any) -> Approvals:
-    # ponytail: bare-typed group/global MRs have no `approvals` manager, so this
-    # reports a fetched zero rather than Failed()/Pending() -- ticket 06 (gateway
-    # rework) should decide whether that's the right signal for those scopes.
-    if not hasattr(raw_mr, "approvals"):
-        return Approvals(given=0, required=0)
+    # `raw_mr` here is always a project-scoped MR (enrich_merge_request fetches
+    # via projects.get(project).mergerequests.get(iid)), so `approvals` is
+    # always present -- no bare-typed group/global fallback needed.
     approval = raw_mr.approvals.get()
     return Approvals(given=len(approval.approved_by), required=approval.approvals_required)
 
@@ -58,10 +57,8 @@ def _pipeline_status(raw_mr: Any) -> str | None:
 
 
 def _line_stats(raw_mr: Any) -> LineStats:
-    # ponytail: same ceiling as _approvals above -- no `changes` manager on
-    # bare-typed MRs, so this is a fetched zero, not a Failed()/Pending() signal.
-    if not hasattr(raw_mr, "changes"):
-        return LineStats(added=0, removed=0)
+    # Same as _approvals: raw_mr is always project-scoped here, so `changes`
+    # is always present.
     added = removed = 0
     for change in raw_mr.changes().get("changes", []):
         for line in change.get("diff", "").splitlines():
@@ -87,9 +84,9 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
         web_url=raw_mr.web_url,
         updated_at=raw_mr.updated_at,
         unresolved_discussion_count=_unresolved_discussion_count(raw_mr),
-        approvals=_approvals(raw_mr),
+        approvals=Pending(),
         pipeline_status=_pipeline_status(raw_mr),
-        line_stats=_line_stats(raw_mr),
+        line_stats=Pending(),
     )
 
 
@@ -218,3 +215,7 @@ class GitlabMergeRequestGateway:
             discussions=_discussions(raw_mr),
             diff=_diff_text(raw_mr),
         )
+
+    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+        raw_mr = self._client.projects.get(project).mergerequests.get(iid)
+        return _approvals(raw_mr), _line_stats(raw_mr)
