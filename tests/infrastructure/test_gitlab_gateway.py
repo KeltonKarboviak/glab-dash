@@ -1,6 +1,6 @@
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from types import SimpleNamespace
-from typing import cast
+from typing import NoReturn, cast
 
 import gitlab
 import pytest
@@ -27,6 +27,7 @@ def make_raw_mr(
     defaults = {
         "iid": 42,
         "title": "Add feature",
+        "description": "",
         "author": {"username": "octocat"},
         "source_branch": "feature",
         "target_branch": "main",
@@ -37,7 +38,19 @@ def make_raw_mr(
         "references": {"full": "group/project!42"},
         "discussions": SimpleNamespace(
             list=lambda get_all=True: [
-                SimpleNamespace(resolved=resolved) for resolved in discussions
+                SimpleNamespace(
+                    attributes={
+                        "notes": [
+                            {
+                                "author": {"username": "octocat"},
+                                "body": "a comment",
+                                "resolvable": True,
+                                "resolved": resolved,
+                            }
+                        ]
+                    }
+                )
+                for resolved in discussions
             ]
         ),
         "approvals": SimpleNamespace(
@@ -138,12 +151,15 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
     worker = FakeCancellableWorker()
     token = active_worker.set(worker)
 
-    def cancel_after_first_discussions_call(get_all: bool = True) -> list[SimpleNamespace]:
-        worker.is_cancelled = True
-        return []
+    class CancelingLabels:
+        """Sets the worker cancelled as soon as `_to_domain` reads `labels`."""
+
+        def __iter__(self) -> "Iterator[str]":
+            worker.is_cancelled = True
+            return iter([])
 
     cancelling_raw_mr = make_raw_mr(iid=1)
-    cancelling_raw_mr.discussions.list = cancel_after_first_discussions_call
+    cancelling_raw_mr.labels = CancelingLabels()
     untouched_raw_mr = make_raw_mr(iid=2)
     client = FakeGitlabClient(
         {"group/project": FakeProject([cancelling_raw_mr, untouched_raw_mr])}
@@ -159,14 +175,28 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
     assert result[0].iid == 1
 
 
-def test_unresolved_discussion_count_excludes_resolved_discussions() -> None:
+def test_list_project_merge_requests_does_not_call_discussions_list() -> None:
+    raw_mr = make_raw_mr(discussions=[True, False, False])
+    calls = []
+    raw_mr.discussions.list = lambda get_all=True: calls.append(1) or []
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_project_merge_requests("group/project")
+
+    assert calls == []
+
+
+def test_get_merge_request_detail_unresolved_discussion_count_excludes_resolved_discussions() -> (
+    None
+):
     raw_mr = make_raw_mr(discussions=[True, False, False])
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    result = gateway.list_project_merge_requests("group/project")
+    detail = gateway.get_merge_request_detail("group/project", raw_mr.iid)
 
-    assert result[0].unresolved_discussion_count == 2
+    assert detail.unresolved_discussion_count == 2
 
 
 def test_list_project_merge_requests_leaves_approvals_and_line_stats_pending() -> None:
@@ -190,24 +220,36 @@ def test_enrich_merge_request_returns_approvals_from_a_freshly_fetched_mr() -> N
     assert approvals == Approvals(given=1, required=2)
 
 
-def test_pipeline_status_is_the_latest_pipelines_status() -> None:
+def test_list_project_merge_requests_does_not_call_pipelines_list() -> None:
+    raw_mr = make_raw_mr(pipeline_statuses=["success", "failed"])
+    calls = []
+    raw_mr.pipelines.list = lambda get_all=True: calls.append(1) or []
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_project_merge_requests("group/project")
+
+    assert calls == []
+
+
+def test_get_merge_request_detail_pipeline_status_is_the_latest_pipelines_status() -> None:
     raw_mr = make_raw_mr(pipeline_statuses=["success", "failed"])
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    result = gateway.list_project_merge_requests("group/project")
+    detail = gateway.get_merge_request_detail("group/project", raw_mr.iid)
 
-    assert result[0].pipeline_status == "success"
+    assert detail.pipeline_status == "success"
 
 
-def test_pipeline_status_is_none_when_there_are_no_pipelines() -> None:
+def test_get_merge_request_detail_pipeline_status_is_none_when_there_are_no_pipelines() -> None:
     raw_mr = make_raw_mr(pipeline_statuses=[])
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    result = gateway.list_project_merge_requests("group/project")
+    detail = gateway.get_merge_request_detail("group/project", raw_mr.iid)
 
-    assert result[0].pipeline_status is None
+    assert detail.pipeline_status is None
 
 
 def test_enrich_merge_request_returns_line_stats_from_a_freshly_fetched_mr() -> None:
@@ -290,8 +332,6 @@ def test_lists_a_groups_merge_requests_without_project_only_managers() -> None:
     assert len(result) == 1
     mr = result[0]
     assert mr.approvals == Pending()
-    assert mr.pipeline_status is None
-    assert mr.unresolved_discussion_count == 0
     assert mr.line_stats == Pending()
 
 
@@ -305,8 +345,6 @@ def test_lists_global_merge_requests_without_project_only_managers() -> None:
     assert len(result) == 1
     mr = result[0]
     assert mr.approvals == Pending()
-    assert mr.pipeline_status is None
-    assert mr.unresolved_discussion_count == 0
     assert mr.line_stats == Pending()
 
 
@@ -375,6 +413,49 @@ def test_list_global_merge_requests_forwards_filters_alongside_scope_all() -> No
     assert client.mergerequests.list_kwargs == {"scope": "all", "state": "opened", "author_username": "octocat"}
 
 
+def _raise_if_touched(*_args: object, **_kwargs: object) -> NoReturn:
+    raise AssertionError("first paint must not make any per-MR API call")
+
+
+def _make_raw_mr_that_raises_on_any_per_mr_call(**overrides: object) -> SimpleNamespace:
+    raw_mr = make_raw_mr(**overrides)
+    raw_mr.discussions.list = _raise_if_touched
+    raw_mr.pipelines.list = _raise_if_touched
+    raw_mr.approvals.get = _raise_if_touched
+    raw_mr.changes = _raise_if_touched
+    return raw_mr
+
+
+def test_list_project_merge_requests_makes_exactly_one_list_call_and_zero_per_mr_calls() -> None:
+    raw_mr = _make_raw_mr_that_raises_on_any_per_mr_call()
+    client = FakeGitlabClient({"group/project": FakeProject([raw_mr, raw_mr])})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    result = gateway.list_project_merge_requests("group/project")
+
+    assert len(result) == 2
+
+
+def test_list_group_merge_requests_makes_exactly_one_list_call_and_zero_per_mr_calls() -> None:
+    raw_mr = _make_raw_mr_that_raises_on_any_per_mr_call(references={"full": "team/project!42"})
+    client = FakeGitlabClient(groups_by_path={"team": FakeGroup([raw_mr, raw_mr])})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    result = gateway.list_group_merge_requests("team")
+
+    assert len(result) == 2
+
+
+def test_list_global_merge_requests_makes_exactly_one_list_call_and_zero_per_mr_calls() -> None:
+    raw_mr = _make_raw_mr_that_raises_on_any_per_mr_call(references={"full": "team/project!42"})
+    client = FakeGitlabClient(global_raw_mrs=[raw_mr, raw_mr])
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    result = gateway.list_global_merge_requests()
+
+    assert len(result) == 2
+
+
 def test_get_merge_request_detail_returns_description_discussions_and_diff() -> None:
     raw_mr = SimpleNamespace(
         iid=42,
@@ -384,13 +465,24 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
                 SimpleNamespace(
                     attributes={
                         "notes": [
-                            {"author": {"username": "octocat"}, "body": "Looks good"},
-                            {"author": {"username": "hubot"}, "body": "Agreed"},
+                            {
+                                "author": {"username": "octocat"},
+                                "body": "Looks good",
+                                "resolvable": True,
+                                "resolved": False,
+                            },
+                            {
+                                "author": {"username": "hubot"},
+                                "body": "Agreed",
+                                "resolvable": True,
+                                "resolved": True,
+                            },
                         ]
                     }
                 )
             ]
         ),
+        pipelines=SimpleNamespace(list=lambda get_all=True: [SimpleNamespace(status="success")]),
         changes=lambda: {
             "changes": [{"old_path": "a.py", "new_path": "a.py", "diff": "+new line\n"}]
         },
@@ -406,6 +498,8 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
     assert [note.body for note in detail.discussions[0].notes] == ["Looks good", "Agreed"]
     assert "diff --git a/a.py b/a.py" in detail.diff
     assert "+new line" in detail.diff
+    assert detail.unresolved_discussion_count == 1
+    assert detail.pipeline_status == "success"
 
 
 class RaisingManager:

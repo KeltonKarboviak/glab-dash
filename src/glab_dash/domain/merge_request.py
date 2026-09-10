@@ -27,6 +27,8 @@ class MergeRequestDetail:
     description: str
     discussions: list[Discussion]
     diff: str
+    unresolved_discussion_count: int = 0
+    pipeline_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,9 +66,7 @@ class MergeRequest:
     updated_at: str
     assignee: str | None = None
     labels: list[str] = field(default_factory=list)
-    unresolved_discussion_count: int = 0
     approvals: Pending | Approvals | Failed = Pending()
-    pipeline_status: str | None = None
     line_stats: Pending | LineStats | Failed = Pending()
 
 

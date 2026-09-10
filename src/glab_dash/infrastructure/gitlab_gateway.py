@@ -33,12 +33,16 @@ def build_gitlab_client(token: str, url: str) -> gitlab.Gitlab:
 
 
 def _unresolved_discussion_count(raw_mr: Any) -> int:
-    # ponytail: group/global-scoped MRs are GitLab's bare GroupMergeRequest/
-    # MergeRequest types, which have no `discussions` manager -- only
-    # ProjectMergeRequest does. Skip enrichment rather than crash.
-    if not hasattr(raw_mr, "discussions"):
-        return 0
-    return sum(1 for discussion in raw_mr.discussions.list(get_all=True) if not discussion.resolved)
+    # `raw_mr` here is always project-scoped (get_merge_request_detail fetches
+    # via projects.get(project).mergerequests.get(iid)), so `discussions` is
+    # always present. GitLab's discussion objects carry `resolved` per note,
+    # not on the discussion itself -- there is no top-level `discussion.resolved`.
+    count = 0
+    for discussion in raw_mr.discussions.list(get_all=True):
+        notes = discussion.attributes["notes"]
+        if any(note.get("resolvable") and not note.get("resolved") for note in notes):
+            count += 1
+    return count
 
 
 def _approvals(raw_mr: Any) -> Approvals:
@@ -50,8 +54,9 @@ def _approvals(raw_mr: Any) -> Approvals:
 
 
 def _pipeline_status(raw_mr: Any) -> str | None:
-    if not hasattr(raw_mr, "pipelines"):
-        return None
+    # `raw_mr` here is always project-scoped (get_merge_request_detail fetches
+    # via projects.get(project).mergerequests.get(iid)), so `pipelines` is
+    # always present -- no bare-typed group/global fallback needed.
     pipelines = raw_mr.pipelines.list(get_all=True)
     return pipelines[0].status if pipelines else None
 
@@ -83,9 +88,7 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
         labels=list(raw_mr.labels),
         web_url=raw_mr.web_url,
         updated_at=raw_mr.updated_at,
-        unresolved_discussion_count=_unresolved_discussion_count(raw_mr),
         approvals=Pending(),
-        pipeline_status=_pipeline_status(raw_mr),
         line_stats=Pending(),
     )
 
@@ -214,6 +217,8 @@ class GitlabMergeRequestGateway:
             description=raw_mr.description or "",
             discussions=_discussions(raw_mr),
             diff=_diff_text(raw_mr),
+            unresolved_discussion_count=_unresolved_discussion_count(raw_mr),
+            pipeline_status=_pipeline_status(raw_mr),
         )
 
     def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
