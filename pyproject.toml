@@ -19,6 +19,7 @@ dev = [
     "pytest-textual-snapshot>=1.0.0",
     "pytest-asyncio>=1.4.0",
     "ty>=0.0.76",
+    "py-spy>=0.4.2",
 ]
 
 [build-system]
@@ -45,3 +46,4 @@ asyncio_mode = "auto"
 
 [project.scripts]
 glab-dash = "glab_dash.infrastructure.tui.app:run"
+profile-glab-dash = "glab_dash.infrastructure.profiling:record"
