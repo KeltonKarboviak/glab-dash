@@ -2,7 +2,7 @@ from dataclasses import replace
 
 from glab_dash.domain.config import MergeRequestState
 from glab_dash.domain.merge_request import Approvals, Failed, LineStats, MergeRequest, Pending
-from glab_dash.infrastructure.tui.rows import render_approvals, render_line_stats, render_mr_row
+from glab_dash.infrastructure.tui.rows import format_line_stats, render_approvals, render_mr_row
 
 
 def _make_mr(**overrides: object) -> MergeRequest:
@@ -66,13 +66,5 @@ def test_render_approvals_shows_fixed_glyph_when_failed() -> None:
     assert render_approvals(Failed(), frame="⠹") == "⚠"
 
 
-def test_render_line_stats_shows_spinner_frame_when_pending() -> None:
-    assert render_line_stats(Pending(), frame="⠹") == "⠹"
-
-
-def test_render_line_stats_shows_added_and_removed_when_resolved() -> None:
-    assert render_line_stats(LineStats(added=34, removed=12), frame="⠹") == "+34/-12"
-
-
-def test_render_line_stats_shows_fixed_glyph_when_failed() -> None:
-    assert render_line_stats(Failed(), frame="⠹") == "⚠"
+def test_format_line_stats_shows_added_and_removed() -> None:
+    assert format_line_stats(LineStats(added=34, removed=12)) == "+34/-12"

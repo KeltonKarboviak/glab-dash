@@ -57,10 +57,12 @@ CLI config → `GITLAB_TOKEN` → own config file) until one yields a token.
 ## Enrichment
 
 The set of merge request fields not present on GitLab's MR-list response
-and requiring additional API calls to obtain: approvals (given/required),
-diff stats (additions/deletions), pipeline status, unresolved discussion
-count. Distinct from list fields (title, state, author, assignee, labels),
-which arrive on the initial list fetch.
+and requiring additional API calls to obtain, fetched asynchronously after
+first paint without blocking the list: approvals (given/required) only.
+Distinct from list fields (title, state, author, assignee, labels), which
+arrive on the initial list fetch, and from fields shown only in the detail
+view (pipeline status, unresolved discussion count, line stats), which are
+fetched on-demand instead of as part of progressive enrichment.
 
 ## Boot
 
@@ -82,9 +84,9 @@ without blocking or re-rendering the whole list.
 
 ## Pending
 
-A merge request's enrichment field (approvals or diff stats) not yet
-fetched. Distinct from a fetched zero — a merge request with `Pending`
-approvals has no known approval count yet, not zero approvals.
+A merge request's approvals enrichment field not yet fetched. Distinct from
+a fetched zero — a merge request with `Pending` approvals has no known
+approval count yet, not zero approvals.
 
 ## Approvals
 
@@ -94,16 +96,19 @@ together as one unit.
 
 ## Line stats
 
-A merge request's diff-size enrichment: lines added and lines removed.
-Added/removed always arrive and update together as one unit, independently
-of Approvals — the two enrichment fields resolve on separate timelines.
+A merge request's diff-size detail field: lines added and lines removed.
+Fetched only as part of the on-demand detail view (`MergeRequestDetail`),
+alongside pipeline status and unresolved discussion count — not part of
+progressive enrichment, and not shown in the MR list. Derived from the same
+`.changes()` call the detail view already makes to build the diff preview,
+so adding it costs no additional API call.
 
 ## Failed
 
-A merge request's enrichment field (approvals or line stats) that was
-attempted but could not be fetched. Distinct from `Pending` — a `Failed`
-field will not be retried automatically, whereas `Pending` means the fetch
-just hasn't completed yet.
+A merge request's approvals enrichment field that was attempted but could
+not be fetched. Distinct from `Pending` — a `Failed` field will not be
+retried automatically, whereas `Pending` means the fetch just hasn't
+completed yet.
 
 ## Warm-start cache
 
@@ -118,10 +123,9 @@ requests no longer present in the section's latest fetch.
 
 ## Stale
 
-A merge request's enrichment field (approvals or line stats) shown from
-the warm-start cache at first paint, before the background fetch has
-confirmed or replaced it. Distinct from `Pending` (no value known yet) and
-`Failed` (fetch attempted and gave up) — `Stale` has a value, just an
-unconfirmed one. Resolves to a fresh value through the same per-MR
-streaming update path used for `Pending → resolved`, no separate
-mechanism.
+A merge request's approvals enrichment field shown from the warm-start
+cache at first paint, before the background fetch has confirmed or
+replaced it. Distinct from `Pending` (no value known yet) and `Failed`
+(fetch attempted and gave up) — `Stale` has a value, just an unconfirmed
+one. Resolves to a fresh value through the same per-MR streaming update
+path used for `Pending → resolved`, no separate mechanism.

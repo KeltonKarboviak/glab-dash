@@ -7,7 +7,6 @@ import structlog
 from glab_dash.domain.config import MergeRequestState, Scope, Section
 from glab_dash.domain.merge_request import (
     Approvals,
-    LineStats,
     MergeRequest,
     MergeRequestDetail,
     filter_by_assignee,
@@ -46,7 +45,7 @@ class MergeRequestGateway(Protocol):
         labels: list[str] | None = None,
     ) -> list[MergeRequest]: ...
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail: ...
-    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]: ...
+    def enrich_merge_request(self, project: str, iid: int) -> Approvals: ...
 
 
 log = structlog.get_logger(__name__)

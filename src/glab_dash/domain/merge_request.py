@@ -23,12 +23,19 @@ class Discussion:
 
 
 @dataclass(frozen=True)
+class LineStats:
+    added: int
+    removed: int
+
+
+@dataclass(frozen=True)
 class MergeRequestDetail:
     description: str
     discussions: list[Discussion]
     diff: str
     unresolved_discussion_count: int = 0
     pipeline_status: str | None = None
+    line_stats: LineStats = LineStats(added=0, removed=0)
 
 
 @dataclass(frozen=True)
@@ -40,12 +47,6 @@ class Pending:
 class Approvals:
     given: int
     required: int
-
-
-@dataclass(frozen=True)
-class LineStats:
-    added: int
-    removed: int
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,6 @@ class MergeRequest:
     assignee: str | None = None
     labels: list[str] = field(default_factory=list)
     approvals: Pending | Approvals | Failed = Pending()
-    line_stats: Pending | LineStats | Failed = Pending()
 
 
 def filter_by_state(

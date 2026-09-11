@@ -61,19 +61,6 @@ def _pipeline_status(raw_mr: Any) -> str | None:
     return pipelines[0].status if pipelines else None
 
 
-def _line_stats(raw_mr: Any) -> LineStats:
-    # Same as _approvals: raw_mr is always project-scoped here, so `changes`
-    # is always present.
-    added = removed = 0
-    for change in raw_mr.changes().get("changes", []):
-        for line in change.get("diff", "").splitlines():
-            if line.startswith("+") and not line.startswith("+++"):
-                added += 1
-            elif line.startswith("-") and not line.startswith("---"):
-                removed += 1
-    return LineStats(added=added, removed=removed)
-
-
 def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
     assignee = getattr(raw_mr, "assignee", None)
     return MergeRequest(
@@ -89,7 +76,6 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
         web_url=raw_mr.web_url,
         updated_at=raw_mr.updated_at,
         approvals=Pending(),
-        line_stats=Pending(),
     )
 
 
@@ -104,12 +90,22 @@ def _discussions(raw_mr: Any) -> list[Discussion]:
     return discussions
 
 
-def _diff_text(raw_mr: Any) -> str:
+def _diff_text_and_line_stats(raw_mr: Any) -> tuple[str, LineStats]:
+    # One `.changes()` call serves both the diff preview and its line
+    # stats -- the detail view already pays for the full diff body, so
+    # counting +/- lines from it costs no additional API call.
     sections = []
+    added = removed = 0
     for change in raw_mr.changes().get("changes", []):
         sections.append(f"diff --git a/{change['old_path']} b/{change['new_path']}")
-        sections.append(change.get("diff", ""))
-    return "\n".join(sections)
+        diff = change.get("diff", "")
+        sections.append(diff)
+        for line in diff.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                added += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                removed += 1
+    return "\n".join(sections), LineStats(added=added, removed=removed)
 
 
 def _project_from_references(raw_mr: Any) -> str:
@@ -213,14 +209,16 @@ class GitlabMergeRequestGateway:
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
         raw_mr = self._client.projects.get(project).mergerequests.get(iid)
+        diff, line_stats = _diff_text_and_line_stats(raw_mr)
         return MergeRequestDetail(
             description=raw_mr.description or "",
             discussions=_discussions(raw_mr),
-            diff=_diff_text(raw_mr),
+            diff=diff,
             unresolved_discussion_count=_unresolved_discussion_count(raw_mr),
             pipeline_status=_pipeline_status(raw_mr),
+            line_stats=line_stats,
         )
 
-    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
         raw_mr = self._client.projects.get(project).mergerequests.get(iid)
-        return _approvals(raw_mr), _line_stats(raw_mr)
+        return _approvals(raw_mr)

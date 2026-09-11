@@ -22,7 +22,6 @@ from glab_dash.domain.config import Config, ConfigError, Section
 from glab_dash.domain.merge_request import (
     Approvals,
     Failed,
-    LineStats,
     MergeRequest,
     MergeRequestDetail,
     Pending,
@@ -38,8 +37,8 @@ from glab_dash.infrastructure.logging import configure_logging
 from glab_dash.infrastructure.tui.diff import colorize_diff
 from glab_dash.infrastructure.tui.rows import (
     MR_ROW_HEIGHT,
+    format_line_stats,
     render_approvals,
-    render_line_stats,
     render_mr_row,
 )
 
@@ -75,7 +74,7 @@ def _enrich_merge_request_with_retry(
     gateway: MergeRequestGateway,
     mr: MergeRequest,
     sleep: Callable[[float], None],
-) -> tuple[Approvals, LineStats] | None:
+) -> Approvals | None:
     """Try `enrich_merge_request` up to 3 times total, backing off between retries."""
     for attempt, backoff in enumerate((0.0, *ENRICHMENT_RETRY_BACKOFFS_SECONDS)):
         if attempt:
@@ -91,7 +90,7 @@ def _enrich_section(
     gateway: MergeRequestGateway,
     table_id: str,
     merge_requests: list[MergeRequest],
-    update_row: Callable[[str, str, Approvals | Failed, LineStats | Failed], None],
+    update_row: Callable[[str, str, Approvals | Failed], None],
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     for mr in merge_requests:
@@ -101,10 +100,9 @@ def _enrich_section(
         if _enrichment_quit_requested():
             break
         if result is None:
-            update_row(table_id, _row_key(mr), Failed(), Failed())
+            update_row(table_id, _row_key(mr), Failed())
         else:
-            approvals, line_stats = result
-            update_row(table_id, _row_key(mr), approvals, line_stats)
+            update_row(table_id, _row_key(mr), result)
 
 
 class GlabDashApp(App):
@@ -156,7 +154,6 @@ class GlabDashApp(App):
                 "Labels",
                 "Updated",
                 ("Approvals", "approvals"),
-                ("Lines", "lines"),
             )
             worker_name = f"section-{index}"
             self._tables_by_worker_name[worker_name] = table
@@ -187,9 +184,7 @@ class GlabDashApp(App):
             return
         merge_requests_by_row_key = self._merge_requests_by_table_id.get(table.id, {})
         failed_merge_requests = [
-            mr
-            for mr in merge_requests_by_row_key.values()
-            if isinstance(mr.approvals, Failed) or isinstance(mr.line_stats, Failed)
+            mr for mr in merge_requests_by_row_key.values() if isinstance(mr.approvals, Failed)
         ]
         if not failed_merge_requests:
             return
@@ -288,7 +283,9 @@ class GlabDashApp(App):
         )
 
     def _render_preview(self, detail: MergeRequestDetail) -> None:
-        text = Text(detail.description or "(no description)")
+        text = Text(format_line_stats(detail.line_stats), style="dim")
+        text.append("\n\n")
+        text.append(detail.description or "(no description)")
         text.append("\n\n")
         for discussion in detail.discussions:
             for note in discussion.notes:
@@ -327,14 +324,12 @@ class GlabDashApp(App):
         for mr in merge_requests:
             state_icon, extended_title, labels, updated_at = render_mr_row(mr)
             approvals_cell = render_approvals(mr.approvals, self._spinner_frame)
-            lines_cell = render_line_stats(mr.line_stats, self._spinner_frame)
             table.add_row(
                 state_icon,
                 extended_title,
                 labels,
                 updated_at,
                 approvals_cell,
-                lines_cell,
                 height=MR_ROW_HEIGHT,
                 key=_row_key(mr),
             )
@@ -361,17 +356,15 @@ class GlabDashApp(App):
         table_id: str,
         row_key: str,
         approvals: Approvals | Failed,
-        line_stats: LineStats | Failed,
     ) -> None:
         merge_requests_by_row_key = self._merge_requests_by_table_id.get(table_id)
         if merge_requests_by_row_key is None or row_key not in merge_requests_by_row_key:
             return
         merge_requests_by_row_key[row_key] = replace(
-            merge_requests_by_row_key[row_key], approvals=approvals, line_stats=line_stats
+            merge_requests_by_row_key[row_key], approvals=approvals
         )
         table = self.query_one(f"#{table_id}", DataTable)
         table.update_cell(row_key, "approvals", render_approvals(approvals, self._spinner_frame))
-        table.update_cell(row_key, "lines", render_line_stats(line_stats, self._spinner_frame))
 
     def _advance_spinner(self) -> None:
         frame_index = (SPINNER_FRAMES.index(self._spinner_frame) + 1) % len(SPINNER_FRAMES)
@@ -381,8 +374,6 @@ class GlabDashApp(App):
             for row_key, mr in merge_requests_by_row_key.items():
                 if isinstance(mr.approvals, Pending):
                     table.update_cell(row_key, "approvals", self._spinner_frame)
-                if isinstance(mr.line_stats, Pending):
-                    table.update_cell(row_key, "lines", self._spinner_frame)
 
     def _render_section_error(self, worker_name: str, error: BaseException | None) -> None:
         table = self._tables_by_worker_name.get(worker_name)

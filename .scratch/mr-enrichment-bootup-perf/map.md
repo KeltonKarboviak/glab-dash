@@ -30,6 +30,19 @@ Prototype E doesn't clear (a)'s bar.
 - (charting session, no ticket) "Bootup ≤1s" means first paint (list fields only); progressive enrichment after first paint is accepted UX; warm-start cache is in scope as a later lever, layered on after cold-boot-to-first-paint is solved.
 - (grilling session, no ticket) Prototype E (single group-level GraphQL query) measured 3.88-4.93s live — still 3.9-4.9x over the ≤1s bar. Confirmed: the floor is GitLab computing `diffStatsSummary`/approvals per MR server-side, not round-trip count or client concurrency (see `docs/prototypes/2026-09-04-mr-enrichment-perf-prototypes.md`). Destination (b), progressive enrichment, is now locked in; option (a) is closed out.
 - (grilling session, no ticket) Progressive enrichment scope is exactly `{approvals, diff_stats}` — `pipeline_status`/`unresolved_discussion_count` stay on the existing on-demand detail-fetch path, unwidened.
+  **SUPERSEDED** — see next entry.
+- (grilling session `line-stats-efficiency-grill`, no ticket, see `docs/adr/0001-line-stats-moves-to-detail-fetch.md`)
+  No cheaper GitLab API exists for MR-scoped line stats (REST has no
+  MR-level stats endpoint; GraphQL's `diffStatsSummary` trades payload
+  size for per-node server compute cost, plus a second experimental
+  transport). Progressive enrichment scope narrows to `{approvals}` only.
+  `line_stats` moves to the on-demand detail-fetch path alongside
+  `pipeline_status`/`unresolved_discussion_count` — free, since
+  `get_merge_request_detail` already calls `.changes()` for the diff
+  preview. The MR list's Lines column and its spinner cell are removed.
+  Issues 01/03/04 below describe the now-superseded two-field
+  (`approvals`+`line_stats`) mechanics; implementation should narrow them
+  to approvals-only.
 - (grilling session, no ticket) Mechanism: a second per-section Textual worker (e.g. `f"section-{index}-enrich"`), started after the first-paint worker completes, reusing the existing `Worker.StateChanged`/`_tables_by_worker_name` pattern in `app.py` rather than a new concurrency primitive.
 - (grilling session, no ticket) Enrichment updates rows as each chunk/batch lands (streamed), not in one batch at the end — that's the reason progressive enrichment is the destination.
 - (grilling session, no ticket) Fact: `DataTable.add_row` at `app.py:225` never passes a `key=`, so no stable row identity exists today for routing an enrichment result back to its row under sort/filter. Needs adding (e.g. `key=f"{mr.project}#{mr.iid}"`) as part of whichever ticket implements the merge-in-place update.

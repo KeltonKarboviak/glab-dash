@@ -33,10 +33,6 @@ def render_approvals(value: Pending | Approvals | Failed, frame: str) -> str:
     return frame
 
 
-def render_line_stats(value: Pending | LineStats | Failed, frame: str) -> str:
-    """Render a spinner frame while pending, "+added/-removed" once resolved, or an error glyph."""
-    if isinstance(value, LineStats):
-        return f"+{value.added}/-{value.removed}"
-    if isinstance(value, Failed):
-        return FAILED_GLYPH
-    return frame
+def format_line_stats(value: LineStats) -> str:
+    """Render a detail view's line stats as "+added/-removed"."""
+    return f"+{value.added}/-{value.removed}"

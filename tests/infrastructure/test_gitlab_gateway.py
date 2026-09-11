@@ -63,7 +63,11 @@ def make_raw_mr(
                 SimpleNamespace(status=status) for status in pipeline_statuses
             ]
         ),
-        "changes": lambda: {"changes": [{"diff": diff} for diff in diffs]},
+        "changes": lambda: {
+            "changes": [
+                {"old_path": "file.py", "new_path": "file.py", "diff": diff} for diff in diffs
+            ]
+        },
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -199,7 +203,7 @@ def test_get_merge_request_detail_unresolved_discussion_count_excludes_resolved_
     assert detail.unresolved_discussion_count == 2
 
 
-def test_list_project_merge_requests_leaves_approvals_and_line_stats_pending() -> None:
+def test_list_project_merge_requests_leaves_approvals_pending() -> None:
     raw_mr = make_raw_mr(approved_by=[{"username": "octocat"}], approvals_required=2)
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
@@ -207,7 +211,6 @@ def test_list_project_merge_requests_leaves_approvals_and_line_stats_pending() -
     result = gateway.list_project_merge_requests("group/project")
 
     assert result[0].approvals == Pending()
-    assert result[0].line_stats == Pending()
 
 
 def test_enrich_merge_request_returns_approvals_from_a_freshly_fetched_mr() -> None:
@@ -215,7 +218,7 @@ def test_enrich_merge_request_returns_approvals_from_a_freshly_fetched_mr() -> N
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    approvals, _line_stats = gateway.enrich_merge_request("group/project", raw_mr.iid)
+    approvals = gateway.enrich_merge_request("group/project", raw_mr.iid)
 
     assert approvals == Approvals(given=1, required=2)
 
@@ -252,7 +255,7 @@ def test_get_merge_request_detail_pipeline_status_is_none_when_there_are_no_pipe
     assert detail.pipeline_status is None
 
 
-def test_enrich_merge_request_returns_line_stats_from_a_freshly_fetched_mr() -> None:
+def test_get_merge_request_detail_returns_line_stats_from_the_same_diff_it_previews() -> None:
     diffs = [
         "@@ -1,2 +1,3 @@\n-old line\n+++ b/file\n+new line 1\n+new line 2\n",
         "@@ -1,1 +1,1 @@\n--- a/other\n-removed line\n",
@@ -261,9 +264,9 @@ def test_enrich_merge_request_returns_line_stats_from_a_freshly_fetched_mr() -> 
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    _approvals, line_stats = gateway.enrich_merge_request("group/project", raw_mr.iid)
+    detail = gateway.get_merge_request_detail("group/project", raw_mr.iid)
 
-    assert line_stats == LineStats(added=2, removed=2)
+    assert detail.line_stats == LineStats(added=2, removed=2)
 
 
 def test_maps_assignee_username_when_present() -> None:
@@ -332,7 +335,6 @@ def test_lists_a_groups_merge_requests_without_project_only_managers() -> None:
     assert len(result) == 1
     mr = result[0]
     assert mr.approvals == Pending()
-    assert mr.line_stats == Pending()
 
 
 def test_lists_global_merge_requests_without_project_only_managers() -> None:
@@ -345,7 +347,6 @@ def test_lists_global_merge_requests_without_project_only_managers() -> None:
     assert len(result) == 1
     mr = result[0]
     assert mr.approvals == Pending()
-    assert mr.line_stats == Pending()
 
 
 def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users() -> None:

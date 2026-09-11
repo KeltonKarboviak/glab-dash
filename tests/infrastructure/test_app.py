@@ -16,7 +16,7 @@ from glab_dash.domain.merge_request import (
     MergeRequestDetail,
     SectionNotFoundError,
 )
-from glab_dash.infrastructure.tui.app import SPINNER_FRAMES, GlabDashApp
+from glab_dash.infrastructure.tui.app import GlabDashApp
 from glab_dash.infrastructure.tui.rows import FAILED_GLYPH
 
 
@@ -43,8 +43,8 @@ class FakeGateway:
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
         return self._detail
 
-    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
-        return Approvals(given=0, required=0), LineStats(added=0, removed=0)
+    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
+        return Approvals(given=0, required=0)
 
 
 class FailingGateway:
@@ -60,7 +60,7 @@ class FailingGateway:
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
         raise AssertionError("not used in these tests")
 
-    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
         raise AssertionError("not used in these tests")
 
 
@@ -90,11 +90,11 @@ class SlowCycleGateway:
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
         raise AssertionError("not used in these tests")
 
-    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
         self.enrich_calls += 1
         time.sleep(self._delay)
         cycle = self._cycle
-        return Approvals(given=cycle, required=cycle), LineStats(added=cycle, removed=cycle)
+        return Approvals(given=cycle, required=cycle)
 
 
 def _make_mr(iid: int = 1) -> MergeRequest:
@@ -244,6 +244,7 @@ async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail() 
         description="Fixes the thing",
         discussions=[Discussion(notes=[DiscussionNote(author="octocat", body="Looks good")])],
         diff="+new line\n",
+        line_stats=LineStats(added=3, removed=1),
     )
     app = GlabDashApp(config, FakeGateway([_make_mr()], detail=detail))
 
@@ -259,6 +260,7 @@ async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail() 
 
         assert app.query_one("#preview-pane").display is True
         rendered = cast(Text, app.query_one("#preview-content", Static).content).plain
+        assert "+3/-1" in rendered
         assert "Fixes the thing" in rendered
         assert "octocat" in rendered
         assert "Looks good" in rendered
@@ -443,56 +445,6 @@ async def test_first_paint_success_starts_enrichment_and_resolves_cells(
         table = app.query_one("#table-0", DataTable)
         row_key = "group/project#1"
         assert table.get_cell(row_key, "approvals") == "0/0"
-        assert table.get_cell(row_key, "lines") == "+0/-0"
-
-
-async def test_approvals_cell_resolves_independently_of_lines_cell(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = Config(
-        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
-    )
-    gateway = FakeGateway([_make_mr()])
-    app = GlabDashApp(config, gateway)
-
-    calls: list[tuple[str, object, object]] = []
-    original_update_cell = DataTable.update_cell
-
-    def tracking_update_cell(
-        self: DataTable, row_key: str, column_key: str, value: object, *, update_width: bool = False
-    ) -> None:
-        if column_key == "approvals" and value == "0/0":
-            calls.append((column_key, value, self.get_cell(row_key, "lines")))
-        else:
-            calls.append((column_key, value, None))
-        return original_update_cell(self, row_key, column_key, value, update_width=update_width)
-
-    monkeypatch.setattr(DataTable, "update_cell", tracking_update_cell)
-
-    async with app.run_test() as pilot:
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-
-        approvals_resolution = ("approvals", "0/0")
-        lines_resolution = ("lines", "+0/-0")
-        approvals_resolved_index = next(
-            i
-            for i, (column_key, value, _) in enumerate(calls)
-            if (column_key, value) == approvals_resolution
-        )
-        lines_value_when_approvals_resolved = str(calls[approvals_resolved_index][2])
-        assert lines_value_when_approvals_resolved in SPINNER_FRAMES
-        lines_resolved_index = next(
-            i
-            for i, (column_key, value, _) in enumerate(calls)
-            if (column_key, value) == lines_resolution
-        )
-        assert lines_resolved_index > approvals_resolved_index
-
-        table = app.query_one("#table-0", DataTable)
-        row_key = "group/project#1"
-        assert table.get_cell(row_key, "approvals") == "0/0"
-        assert table.get_cell(row_key, "lines") == "+0/-0"
 
 
 async def test_question_mark_toggles_the_help_panel() -> None:
@@ -534,7 +486,6 @@ async def test_refresh_cancels_in_flight_enrichment_and_lands_only_the_fresh_cyc
         for mr in merge_requests:
             row_key = f"group/project#{mr.iid}"
             assert table.get_cell(row_key, "approvals") == "2/2"
-            assert table.get_cell(row_key, "lines") == "+2/-2"
         # cycle 1's enrichment must have been cut off, not left to run to
         # completion in the background: 2 full cycles of 5 rows would be 10.
         assert gateway.enrich_calls < 2 * len(merge_requests)
@@ -578,7 +529,7 @@ class FailingEnrichGateway:
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
         raise AssertionError("not used in these tests")
 
-    def enrich_merge_request(self, project: str, iid: int) -> tuple[Approvals, LineStats]:
+    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
         self.enrich_calls += 1
         raise RuntimeError("gitlab api boom")
 
@@ -600,7 +551,6 @@ async def test_persistent_enrichment_failure_shows_failed_glyph_after_retries(
         table = app.query_one("#table-0", DataTable)
         row_key = "group/project#1"
         assert table.get_cell(row_key, "approvals") == FAILED_GLYPH
-        assert table.get_cell(row_key, "lines") == FAILED_GLYPH
         # 3 total attempts per MR: 1 initial + 2 retries.
         assert gateway.enrich_calls == 3
 
@@ -618,7 +568,7 @@ async def test_retry_keybind_only_re_enriches_failed_rows_in_the_active_section(
 
     original_enrich = gateway.enrich_merge_request
 
-    def enrich_merge_request(project: str, iid: int) -> tuple[Approvals, LineStats]:
+    def enrich_merge_request(project: str, iid: int) -> Approvals:
         if iid == failing_mr.iid:
             raise RuntimeError("gitlab api boom")
         return original_enrich(project, iid)
@@ -642,7 +592,7 @@ async def test_retry_keybind_only_re_enriches_failed_rows_in_the_active_section(
         call_counts: dict[int, int] = {}
         original_retry_enrich = gateway.enrich_merge_request
 
-        def counting_enrich(project: str, iid: int) -> tuple[Approvals, LineStats]:
+        def counting_enrich(project: str, iid: int) -> Approvals:
             call_counts[iid] = call_counts.get(iid, 0) + 1
             return original_retry_enrich(project, iid)
 
