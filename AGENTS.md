@@ -1,3 +1,8 @@
+## gh-dash reference
+
+When researching or mirroring a gh-dash feature, read it from the local
+clone at `~/Code/open-source/gh-dash/`, not from memory or the web.
+
 ## Agent skills
 
 ### Issue tracker
