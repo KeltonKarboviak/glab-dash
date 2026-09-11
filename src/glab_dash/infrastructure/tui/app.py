@@ -106,6 +106,24 @@ def _enrich_section(
 
 
 class GlabDashApp(App):
+    CSS = """
+    TabbedContent {
+        height: 1fr;
+    }
+    TabbedContent ContentSwitcher {
+        height: 1fr;
+    }
+    TabPane {
+        height: 1fr;
+    }
+    DataTable {
+        height: 1fr;
+    }
+    #preview-pane {
+        height: 1fr;
+    }
+    """
+
     BINDINGS = [
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),

@@ -270,6 +270,31 @@ async def test_tab_toggles_the_preview_pane_and_loads_the_selected_mrs_detail() 
         assert app.query_one("#preview-pane").display is False
 
 
+async def test_preview_pane_stays_on_screen_when_the_mr_list_overflows_the_terminal() -> None:
+    """Regression: TabbedContent/TabPane/DataTable default to height:auto, so with
+    enough rows the list grows past the terminal and pushes the preview pane (and
+    the list itself) off-screen instead of scrolling."""
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    app = GlabDashApp(config, FakeGateway([_make_mr(iid=i) for i in range(1, 31)]))
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        table = app.query_one(DataTable)
+        assert table.region.y + table.region.height <= app.size.height
+
+        await pilot.press("tab")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        pane = app.query_one("#preview-pane")
+        assert pane.display is True
+        assert pane.region.y + pane.region.height <= app.size.height
+
+
 async def test_enter_focuses_the_preview_pane_so_j_k_scroll_it_not_the_list() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
