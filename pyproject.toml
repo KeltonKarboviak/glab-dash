@@ -48,3 +48,4 @@ asyncio_mode = "auto"
 [project.scripts]
 glab-dash = "glab_dash.infrastructure.tui.app:run"
 profile-glab-dash = "glab_dash.infrastructure.profiling:record"
+dev-glab-dash = "glab_dash.infrastructure.profiling:run_dev"
