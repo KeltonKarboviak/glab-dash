@@ -157,6 +157,13 @@ def _server_side_filters(
     return filters
 
 
+def _list_page_or_all(manager: Any, limit: int | None, filters: dict[str, Any]) -> Any:
+    """Fetch a single page of size `limit`, or every page when `limit` is None."""
+    if limit is None:
+        return manager.list(get_all=True, **filters)
+    return manager.list(get_all=False, per_page=limit, **filters)
+
+
 class GitlabMergeRequestGateway:
     def __init__(self, client: gitlab.Gitlab) -> None:
         self._client = client
@@ -169,13 +176,14 @@ class GitlabMergeRequestGateway:
         author: str | None = None,
         assignee: str | None = None,
         labels: list[str] | None = None,
+        limit: int | None = None,
     ) -> list[MergeRequest]:
         try:
             raw_project = self._client.projects.get(project)
         except gitlab.exceptions.GitlabGetError as e:
             _reraise_not_found("project", project, e)
         filters = _server_side_filters(state, author, assignee, labels or [])
-        raw_mrs = raw_project.mergerequests.list(get_all=True, **filters)
+        raw_mrs = _list_page_or_all(raw_project.mergerequests, limit, filters)
         return _map_all(raw_mrs, project_of=lambda _raw_mr: project)
 
     def list_group_merge_requests(
@@ -186,13 +194,14 @@ class GitlabMergeRequestGateway:
         author: str | None = None,
         assignee: str | None = None,
         labels: list[str] | None = None,
+        limit: int | None = None,
     ) -> list[MergeRequest]:
         try:
             raw_group = self._client.groups.get(group)
         except gitlab.exceptions.GitlabGetError as e:
             _reraise_not_found("group", group, e)
         filters = _server_side_filters(state, author, assignee, labels or [])
-        raw_mrs = raw_group.mergerequests.list(get_all=True, **filters)
+        raw_mrs = _list_page_or_all(raw_group.mergerequests, limit, filters)
         return _map_all(raw_mrs)
 
     def list_global_merge_requests(
@@ -202,9 +211,11 @@ class GitlabMergeRequestGateway:
         author: str | None = None,
         assignee: str | None = None,
         labels: list[str] | None = None,
+        limit: int | None = None,
     ) -> list[MergeRequest]:
         filters = _server_side_filters(state, author, assignee, labels or [])
-        raw_mrs = self._client.mergerequests.list(get_all=True, scope="all", **filters)
+        filters["scope"] = "all"
+        raw_mrs = _list_page_or_all(self._client.mergerequests, limit, filters)
         return _map_all(raw_mrs)
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:

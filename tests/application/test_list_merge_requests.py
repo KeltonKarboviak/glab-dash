@@ -12,14 +12,24 @@ class FakeMergeRequestGateway:
 
     def __init__(self, merge_requests: list[MergeRequest]) -> None:
         self._merge_requests = merge_requests
+        self.received_limit: int | None = None
 
-    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
+    def list_project_merge_requests(
+        self, project: str, *, limit: int | None = None, **_filters: object
+    ) -> list[MergeRequest]:
+        self.received_limit = limit
         return [mr for mr in self._merge_requests if mr.project == project]
 
-    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
+    def list_group_merge_requests(
+        self, group: str, *, limit: int | None = None, **_filters: object
+    ) -> list[MergeRequest]:
+        self.received_limit = limit
         return [mr for mr in self._merge_requests if mr.project.startswith(f"{group}/")]
 
-    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
+    def list_global_merge_requests(
+        self, *, limit: int | None = None, **_filters: object
+    ) -> list[MergeRequest]:
+        self.received_limit = limit
         return list(self._merge_requests)
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
@@ -115,3 +125,21 @@ def test_assignee_at_me_resolves_to_the_authenticated_user() -> None:
     result = list_merge_requests_for_section(gateway, section, current_username="hubot")
 
     assert result == [mine]
+
+
+def test_passes_limit_through_to_the_gateway() -> None:
+    section = Section(title="My MRs", scope=Scope.PROJECT, project="group/project")
+    gateway = FakeMergeRequestGateway([make_mr("group/project", MergeRequestState.OPENED)])
+
+    list_merge_requests_for_section(gateway, section, limit=20)
+
+    assert gateway.received_limit == 20
+
+
+def test_defaults_limit_to_none_when_not_specified() -> None:
+    section = Section(title="My MRs", scope=Scope.PROJECT, project="group/project")
+    gateway = FakeMergeRequestGateway([make_mr("group/project", MergeRequestState.OPENED)])
+
+    list_merge_requests_for_section(gateway, section)
+
+    assert gateway.received_limit is None

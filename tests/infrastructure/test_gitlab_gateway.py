@@ -77,9 +77,11 @@ class FakeMergeRequestManager:
     def __init__(self, raw_mrs: Sequence[SimpleNamespace]) -> None:
         self._raw_mrs = raw_mrs
         self.list_kwargs: dict[str, object] | None = None
+        self.list_get_all: bool | None = None
 
     def list(self, get_all: bool = True, **kwargs: object) -> Sequence[SimpleNamespace]:
         self.list_kwargs = kwargs
+        self.list_get_all = get_all
         return self._raw_mrs
 
     def get(self, iid: int) -> SimpleNamespace:
@@ -412,6 +414,49 @@ def test_list_global_merge_requests_forwards_filters_alongside_scope_all() -> No
     gateway.list_global_merge_requests(state=MergeRequestState.OPENED, author="octocat")
 
     assert client.mergerequests.list_kwargs == {"scope": "all", "state": "opened", "author_username": "octocat"}
+
+
+def test_list_project_merge_requests_without_a_limit_fetches_every_page() -> None:
+    fake_project = FakeProject([make_raw_mr()])
+    client = FakeGitlabClient({"group/project": fake_project})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_project_merge_requests("group/project")
+
+    assert fake_project.mergerequests.list_get_all is True
+    assert "per_page" not in (fake_project.mergerequests.list_kwargs or {})
+
+
+def test_list_project_merge_requests_with_a_limit_fetches_a_single_page() -> None:
+    fake_project = FakeProject([make_raw_mr()])
+    client = FakeGitlabClient({"group/project": fake_project})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_project_merge_requests("group/project", limit=20)
+
+    assert fake_project.mergerequests.list_get_all is False
+    assert fake_project.mergerequests.list_kwargs == {"per_page": 20}
+
+
+def test_list_group_merge_requests_with_a_limit_fetches_a_single_page() -> None:
+    fake_group = FakeGroup([make_raw_mr()])
+    client = FakeGitlabClient(groups_by_path={"team": fake_group})
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_group_merge_requests("team", limit=20)
+
+    assert fake_group.mergerequests.list_get_all is False
+    assert fake_group.mergerequests.list_kwargs == {"per_page": 20}
+
+
+def test_list_global_merge_requests_with_a_limit_fetches_a_single_page() -> None:
+    client = FakeGitlabClient(global_raw_mrs=[make_raw_mr()])
+    gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
+
+    gateway.list_global_merge_requests(limit=20)
+
+    assert client.mergerequests.list_get_all is False
+    assert client.mergerequests.list_kwargs == {"scope": "all", "per_page": 20}
 
 
 def _raise_if_touched(*_args: object, **_kwargs: object) -> NoReturn:

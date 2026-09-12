@@ -45,14 +45,17 @@ from glab_dash.infrastructure.tui.rows import (
 PREVIEW_WORKER_NAME = "preview-detail"
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 SPINNER_TICK_SECONDS = 0.1
+BOOTUP_MERGE_REQUEST_LIMIT = 20
+"""Matches gh-dash's default `prsLimit` -- caps the first paint to one page so
+bootup doesn't pay for a section's entire history before anything renders."""
 
 log = structlog.get_logger(__name__)
 
 
 def _fetch_section_merge_requests(
-    gateway: MergeRequestGateway, section: Section
+    gateway: MergeRequestGateway, section: Section, limit: int | None = None
 ) -> list[MergeRequest]:
-    return list_merge_requests_for_section(gateway, section)
+    return list_merge_requests_for_section(gateway, section, limit=limit)
 
 
 def _row_key(mr: MergeRequest) -> str:
@@ -176,14 +179,16 @@ class GlabDashApp(App):
             worker_name = f"section-{index}"
             self._tables_by_worker_name[worker_name] = table
             self._sections_by_worker_name[worker_name] = section
-            self._fetch_section(worker_name, section)
+            self._fetch_section(worker_name, section, limit=BOOTUP_MERGE_REQUEST_LIMIT)
         self.set_interval(self._config.refresh_interval, self._refresh_all_sections)
         self.set_interval(SPINNER_TICK_SECONDS, self._advance_spinner)
         log.info("tui mounted", section_count=len(self._config.sections))
 
-    def _fetch_section(self, worker_name: str, section: Section) -> None:
+    def _fetch_section(
+        self, worker_name: str, section: Section, *, limit: int | None = None
+    ) -> None:
         self.run_worker(
-            partial(_fetch_section_merge_requests, self._gateway, section),
+            partial(_fetch_section_merge_requests, self._gateway, section, limit),
             name=worker_name,
             thread=True,
             exit_on_error=False,

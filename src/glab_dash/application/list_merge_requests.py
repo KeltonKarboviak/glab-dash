@@ -26,6 +26,7 @@ class MergeRequestGateway(Protocol):
         author: str | None = None,
         assignee: str | None = None,
         labels: list[str] | None = None,
+        limit: int | None = None,
     ) -> list[MergeRequest]: ...
     def list_group_merge_requests(
         self,
@@ -35,6 +36,7 @@ class MergeRequestGateway(Protocol):
         author: str | None = None,
         assignee: str | None = None,
         labels: list[str] | None = None,
+        limit: int | None = None,
     ) -> list[MergeRequest]: ...
     def list_global_merge_requests(
         self,
@@ -43,6 +45,7 @@ class MergeRequestGateway(Protocol):
         author: str | None = None,
         assignee: str | None = None,
         labels: list[str] | None = None,
+        limit: int | None = None,
     ) -> list[MergeRequest]: ...
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail: ...
     def enrich_merge_request(self, project: str, iid: int) -> Approvals: ...
@@ -56,6 +59,7 @@ def _list_by_scope(
     section: Section,
     author: str | None,
     assignee: str | None,
+    limit: int | None,
 ) -> list[MergeRequest]:
     match section.scope:
         case Scope.PROJECT:
@@ -66,6 +70,7 @@ def _list_by_scope(
                 author=author,
                 assignee=assignee,
                 labels=section.labels,
+                limit=limit,
             )
         case Scope.GROUP:
             assert section.group is not None, "GROUP scope requires section.group"
@@ -75,15 +80,23 @@ def _list_by_scope(
                 author=author,
                 assignee=assignee,
                 labels=section.labels,
+                limit=limit,
             )
         case Scope.GLOBAL:
             return gateway.list_global_merge_requests(
-                state=section.state, author=author, assignee=assignee, labels=section.labels
+                state=section.state,
+                author=author,
+                assignee=assignee,
+                labels=section.labels,
+                limit=limit,
             )
 
 
 def list_merge_requests_for_section(
-    gateway: MergeRequestGateway, section: Section, current_username: str | None = None
+    gateway: MergeRequestGateway,
+    section: Section,
+    current_username: str | None = None,
+    limit: int | None = None,
 ) -> list[MergeRequest]:
     """Return `section`'s merge requests, filtered by its configured criteria.
 
@@ -98,7 +111,7 @@ def list_merge_requests_for_section(
     log.info("listing merge requests", section=section.title, scope=section.scope)
     author = resolve_username(section.author, current_username)
     assignee = resolve_username(section.assignee, current_username)
-    merge_requests = _list_by_scope(gateway, section, author, assignee)
+    merge_requests = _list_by_scope(gateway, section, author, assignee, limit)
     merge_requests = filter_by_state(merge_requests, section.state)
     merge_requests = filter_by_author(merge_requests, section.author, current_username)
     merge_requests = filter_by_assignee(merge_requests, section.assignee, current_username)

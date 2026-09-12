@@ -29,15 +29,25 @@ class FakeGateway:
         self._merge_requests = merge_requests
         self._detail = detail or MergeRequestDetail(description="", discussions=[], diff="")
         self.project_list_calls = 0
+        self.received_limits: list[int | None] = []
 
-    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
+    def list_project_merge_requests(
+        self, project: str, *, limit: int | None = None, **_filters: object
+    ) -> list[MergeRequest]:
         self.project_list_calls += 1
+        self.received_limits.append(limit)
         return self._merge_requests
 
-    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
+    def list_group_merge_requests(
+        self, group: str, *, limit: int | None = None, **_filters: object
+    ) -> list[MergeRequest]:
+        self.received_limits.append(limit)
         return self._merge_requests
 
-    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
+    def list_global_merge_requests(
+        self, *, limit: int | None = None, **_filters: object
+    ) -> list[MergeRequest]:
+        self.received_limits.append(limit)
         return self._merge_requests
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
@@ -353,6 +363,25 @@ async def test_r_triggers_an_immediate_refresh_through_the_fetch_path() -> None:
         await pilot.pause()
 
         assert gateway.project_list_calls == 2
+
+
+async def test_bootup_fetches_a_single_page_but_refresh_fetches_everything() -> None:
+    config = Config(
+        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
+    )
+    gateway = FakeGateway([_make_mr()])
+    app = GlabDashApp(config, gateway)
+
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert gateway.received_limits == [20]
+
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert gateway.received_limits == [20, None]
 
 
 async def test_refresh_preserves_the_active_tab_and_cursor_position() -> None:
