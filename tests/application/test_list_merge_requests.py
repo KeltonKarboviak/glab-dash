@@ -1,6 +1,6 @@
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
-from glab_dash.domain.merge_request import MergeRequest, MergeRequestDetail
+from glab_dash.domain.merge_request import Approvals, MergeRequest, MergeRequestDetail
 
 
 class FakeMergeRequestGateway:
@@ -33,6 +33,9 @@ class FakeMergeRequestGateway:
         return list(self._merge_requests)
 
     def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
+        raise NotImplementedError
+
+    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
         raise NotImplementedError
 
 

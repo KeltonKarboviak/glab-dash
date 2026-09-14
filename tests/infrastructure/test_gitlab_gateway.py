@@ -1,10 +1,10 @@
 from collections.abc import Iterator, Sequence
 from types import SimpleNamespace
-from typing import NoReturn, cast
+from typing import Any, NoReturn, cast
 
 import gitlab
 import pytest
-from textual.worker import active_worker
+from textual.worker import Worker, active_worker
 
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
@@ -155,21 +155,19 @@ def test_stops_enriching_merge_requests_once_the_worker_is_cancelled() -> None:
         is_cancelled = False
 
     worker = FakeCancellableWorker()
-    token = active_worker.set(worker)
+    token = active_worker.set(cast("Worker[Any]", worker))
 
     class CancelingLabels:
         """Sets the worker cancelled as soon as `_to_domain` reads `labels`."""
 
-        def __iter__(self) -> "Iterator[str]":
+        def __iter__(self) -> Iterator[str]:
             worker.is_cancelled = True
             return iter([])
 
     cancelling_raw_mr = make_raw_mr(iid=1)
     cancelling_raw_mr.labels = CancelingLabels()
     untouched_raw_mr = make_raw_mr(iid=2)
-    client = FakeGitlabClient(
-        {"group/project": FakeProject([cancelling_raw_mr, untouched_raw_mr])}
-    )
+    client = FakeGitlabClient({"group/project": FakeProject([cancelling_raw_mr, untouched_raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
     try:
@@ -313,7 +311,7 @@ def test_lists_and_maps_every_visible_merge_request_deriving_project_from_refere
     assert result[0].project == "team/project"
 
 
-def _make_bare_raw_mr(**overrides: object) -> SimpleNamespace:
+def _make_bare_raw_mr(**overrides: Any) -> SimpleNamespace:
     """A group/global-scoped merge request as GitLab actually returns it.
 
     Real `GroupMergeRequest`/`MergeRequest` objects have no `approvals`,
@@ -413,7 +411,11 @@ def test_list_global_merge_requests_forwards_filters_alongside_scope_all() -> No
 
     gateway.list_global_merge_requests(state=MergeRequestState.OPENED, author="octocat")
 
-    assert client.mergerequests.list_kwargs == {"scope": "all", "state": "opened", "author_username": "octocat"}
+    assert client.mergerequests.list_kwargs == {
+        "scope": "all",
+        "state": "opened",
+        "author_username": "octocat",
+    }
 
 
 def test_list_project_merge_requests_without_a_limit_fetches_every_page() -> None:
@@ -463,7 +465,7 @@ def _raise_if_touched(*_args: object, **_kwargs: object) -> NoReturn:
     raise AssertionError("first paint must not make any per-MR API call")
 
 
-def _make_raw_mr_that_raises_on_any_per_mr_call(**overrides: object) -> SimpleNamespace:
+def _make_raw_mr_that_raises_on_any_per_mr_call(**overrides: Any) -> SimpleNamespace:
     raw_mr = make_raw_mr(**overrides)
     raw_mr.discussions.list = _raise_if_touched
     raw_mr.pipelines.list = _raise_if_touched

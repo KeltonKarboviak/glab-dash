@@ -627,7 +627,7 @@ async def test_retry_keybind_only_re_enriches_failed_rows_in_the_active_section(
             raise RuntimeError("gitlab api boom")
         return original_enrich(project, iid)
 
-    gateway.enrich_merge_request = enrich_merge_request  # type: ignore[method-assign]
+    gateway.enrich_merge_request = enrich_merge_request  # ty: ignore[invalid-assignment]
     gateway._merge_requests = [ok_mr, failing_mr]
 
     app = GlabDashApp(config, gateway)
@@ -642,7 +642,6 @@ async def test_retry_keybind_only_re_enriches_failed_rows_in_the_active_section(
         assert table.get_cell(ok_row_key, "approvals") == "0/0"
         assert table.get_cell(failing_row_key, "approvals") == FAILED_GLYPH
 
-        gateway.enrich_calls = 0
         call_counts: dict[int, int] = {}
         original_retry_enrich = gateway.enrich_merge_request
 
@@ -650,7 +649,7 @@ async def test_retry_keybind_only_re_enriches_failed_rows_in_the_active_section(
             call_counts[iid] = call_counts.get(iid, 0) + 1
             return original_retry_enrich(project, iid)
 
-        gateway.enrich_merge_request = counting_enrich  # type: ignore[method-assign]
+        gateway.enrich_merge_request = counting_enrich  # ty: ignore[invalid-assignment]
 
         await pilot.press("R")
         await app.workers.wait_for_complete()
