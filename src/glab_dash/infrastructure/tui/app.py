@@ -125,11 +125,16 @@ class GlabDashApp(App):
     #preview-pane {
         height: 1fr;
     }
+    #preview-pane.focused {
+        border: solid $accent;
+    }
     """
 
     BINDINGS = [
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
+        Binding("down", "cursor_down", "Down", show=False),
+        Binding("up", "cursor_up", "Up", show=False),
         Binding("g", "cursor_top", "Top", show=False),
         Binding("G", "cursor_bottom", "Bottom", show=False),
         Binding("[", "previous_tab", "Prev tab", show=False),
@@ -269,13 +274,16 @@ class GlabDashApp(App):
             self._load_preview()
         else:
             self._preview_focused = False
+            self.query_one("#preview-pane").remove_class("focused")
 
     def action_focus_preview(self) -> None:
         if self._preview_visible:
             self._preview_focused = True
+            self.query_one("#preview-pane").add_class("focused")
 
     def action_unfocus_preview(self) -> None:
         self._preview_focused = False
+        self.query_one("#preview-pane").remove_class("focused")
 
     def action_toggle_help_panel(self) -> None:
         if self.screen.query("HelpPanel"):
