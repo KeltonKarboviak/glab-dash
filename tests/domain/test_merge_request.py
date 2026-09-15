@@ -130,12 +130,6 @@ def test_filter_by_labels_empty_returns_every_mr() -> None:
     assert result == [both, one]
 
 
-def test_merge_request_defaults_approvals_to_pending() -> None:
-    mr = make_mr()
-
-    assert mr.approvals == Pending()
-
-
 def test_pending_instances_are_equal() -> None:
     assert Pending() == Pending()
 

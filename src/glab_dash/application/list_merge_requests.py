@@ -102,8 +102,8 @@ def list_merge_requests_for_section(
 
     Filters are pushed into the gateway list call as GitLab API query params
     (see `_server_side_filters` in the gateway) so a section only pays the
-    per-MR enrichment cost for MRs it actually wants -- a group can have tens
-    of thousands of historical MRs but only a handful open. The filter
+    listing cost for MRs it actually wants -- a group can have tens of
+    thousands of historical MRs but only a handful open. The filter
     functions below are re-applied client-side as a safety net (e.g. "@me"
     resolution, and in case a param is ever dropped), which is cheap once the
     server has already narrowed the result set down.

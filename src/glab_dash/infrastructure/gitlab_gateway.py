@@ -13,7 +13,6 @@ from glab_dash.domain.merge_request import (
     LineStats,
     MergeRequest,
     MergeRequestDetail,
-    Pending,
     SectionNotFoundError,
 )
 
@@ -75,7 +74,6 @@ def _to_domain(raw_mr: Any, project: str) -> MergeRequest:
         labels=list(raw_mr.labels),
         web_url=raw_mr.web_url,
         updated_at=raw_mr.updated_at,
-        approvals=Pending(),
     )
 
 
@@ -126,7 +124,9 @@ def _map_all(raw_mrs: Any, project_of: Any = _project_from_references) -> list[M
     return merge_requests
 
 
-def _reraise_not_found(kind: str, name: str, error: gitlab.exceptions.GitlabGetError) -> NoReturn:
+def _reraise_not_found(
+    kind: str, name: str, error: gitlab.exceptions.GitlabOperationError
+) -> NoReturn:
     if error.response_code == 404:
         raise SectionNotFoundError(f"{kind} '{name}' not found") from error
     raise error
@@ -138,12 +138,11 @@ def _server_side_filters(
     assignee: str | None,
     labels: list[str],
 ) -> dict[str, Any]:
-    """Query params GitLab's list endpoints accept to filter before enrichment.
+    """Query params GitLab's list endpoints accept to filter before fetching.
 
-    Filtering here instead of after the fetch avoids paying the per-MR
-    enrichment cost (approvals/pipelines/discussions/changes) for MRs the
-    section doesn't even want -- e.g. a group with 20k total MRs but only 57
-    open ones.
+    Filtering here instead of after the fetch avoids paying the cost of
+    listing MRs the section doesn't even want -- e.g. a group with 20k total
+    MRs but only 57 open ones.
     """
     filters: dict[str, Any] = {}
     if state is not MergeRequestState.ALL:
@@ -178,12 +177,16 @@ class GitlabMergeRequestGateway:
         labels: list[str] | None = None,
         limit: int | None = None,
     ) -> list[MergeRequest]:
-        try:
-            raw_project = self._client.projects.get(project)
-        except gitlab.exceptions.GitlabGetError as e:
-            _reraise_not_found("project", project, e)
+        # `lazy=True` skips the GET that would otherwise fetch the full
+        # project/group before we can even ask for its MRs -- pure overhead
+        # since we only need the object to reach its `mergerequests` manager.
+        # Any 404 for a missing project surfaces from the list call instead.
+        raw_project = self._client.projects.get(project, lazy=True)
         filters = _server_side_filters(state, author, assignee, labels or [])
-        raw_mrs = _list_page_or_all(raw_project.mergerequests, limit, filters)
+        try:
+            raw_mrs = _list_page_or_all(raw_project.mergerequests, limit, filters)
+        except gitlab.exceptions.GitlabListError as e:
+            _reraise_not_found("project", project, e)
         return _map_all(raw_mrs, project_of=lambda _raw_mr: project)
 
     def list_group_merge_requests(
@@ -196,12 +199,12 @@ class GitlabMergeRequestGateway:
         labels: list[str] | None = None,
         limit: int | None = None,
     ) -> list[MergeRequest]:
-        try:
-            raw_group = self._client.groups.get(group)
-        except gitlab.exceptions.GitlabGetError as e:
-            _reraise_not_found("group", group, e)
+        raw_group = self._client.groups.get(group, lazy=True)
         filters = _server_side_filters(state, author, assignee, labels or [])
-        raw_mrs = _list_page_or_all(raw_group.mergerequests, limit, filters)
+        try:
+            raw_mrs = _list_page_or_all(raw_group.mergerequests, limit, filters)
+        except gitlab.exceptions.GitlabListError as e:
+            _reraise_not_found("group", group, e)
         return _map_all(raw_mrs)
 
     def list_global_merge_requests(

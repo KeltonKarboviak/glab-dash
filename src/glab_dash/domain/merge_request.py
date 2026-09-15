@@ -67,7 +67,6 @@ class MergeRequest:
     updated_at: str
     assignee: str | None = None
     labels: list[str] = field(default_factory=list)
-    approvals: Pending | Approvals | Failed = Pending()
 
 
 def filter_by_state(

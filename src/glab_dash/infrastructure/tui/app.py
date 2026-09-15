@@ -1,8 +1,5 @@
 """Textual App shell: one tab per configured section, project tabs list MRs."""
 
-import time
-from collections.abc import Callable
-from dataclasses import replace
 from functools import partial
 
 import structlog
@@ -12,20 +9,14 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
-from textual.worker import NoActiveWorker, Worker, WorkerState, get_current_worker
+from textual.worker import Worker, WorkerState
 
 from glab_dash.application.list_merge_requests import (
     MergeRequestGateway,
     list_merge_requests_for_section,
 )
 from glab_dash.domain.config import Config, ConfigError, Section
-from glab_dash.domain.merge_request import (
-    Approvals,
-    Failed,
-    MergeRequest,
-    MergeRequestDetail,
-    Pending,
-)
+from glab_dash.domain.merge_request import MergeRequest, MergeRequestDetail
 from glab_dash.infrastructure.config import load_config, resolve_config_path
 from glab_dash.infrastructure.credentials import resolve_gitlab_token
 from glab_dash.infrastructure.gitlab_gateway import (
@@ -35,19 +26,17 @@ from glab_dash.infrastructure.gitlab_gateway import (
 )
 from glab_dash.infrastructure.logging import configure_logging
 from glab_dash.infrastructure.tui.diff import colorize_diff
-from glab_dash.infrastructure.tui.rows import (
-    MR_ROW_HEIGHT,
-    format_line_stats,
-    render_approvals,
-    render_mr_row,
-)
+from glab_dash.infrastructure.tui.rows import MR_ROW_HEIGHT, format_line_stats, render_mr_row
 
 PREVIEW_WORKER_NAME = "preview-detail"
-SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-SPINNER_TICK_SECONDS = 0.1
-BOOTUP_MERGE_REQUEST_LIMIT = 20
-"""Matches gh-dash's default `prsLimit` -- caps the first paint to one page so
-bootup doesn't pay for a section's entire history before anything renders."""
+BOOTUP_MERGE_REQUEST_LIMIT = 4
+"""Caps the first paint to a small page so bootup doesn't pay for a section's
+entire history before anything renders. Measured against the live GitLab API
+(group scope, after switching `groups.get`/`projects.get` to `lazy=True` in
+the gateway -- that alone cut a flat ~3s group-metadata fetch that dwarfed MR
+listing): each additional MR in the page costs ~0.1-0.2s server-side, so 4
+keeps first paint reliably under 1s with margin; 20 (gh-dash's default
+`prsLimit`) measured 1.5-4.6s even after the lazy fix."""
 
 log = structlog.get_logger(__name__)
 
@@ -60,52 +49,6 @@ def _fetch_section_merge_requests(
 
 def _row_key(mr: MergeRequest) -> str:
     return f"{mr.project}#{mr.iid}"
-
-
-def _enrichment_quit_requested() -> bool:
-    """Whether the Textual worker running this enrichment has been cancelled."""
-    try:
-        return get_current_worker().is_cancelled
-    except NoActiveWorker:
-        return False
-
-
-ENRICHMENT_RETRY_BACKOFFS_SECONDS = (1.0, 3.0)
-
-
-def _enrich_merge_request_with_retry(
-    gateway: MergeRequestGateway,
-    mr: MergeRequest,
-    sleep: Callable[[float], None],
-) -> Approvals | None:
-    """Try `enrich_merge_request` up to 3 times total, backing off between retries."""
-    for attempt, backoff in enumerate((0.0, *ENRICHMENT_RETRY_BACKOFFS_SECONDS)):
-        if attempt:
-            sleep(backoff)
-        try:
-            return gateway.enrich_merge_request(mr.project, mr.iid)
-        except Exception:
-            log.exception("enrich_merge_request failed", project=mr.project, iid=mr.iid)
-    return None
-
-
-def _enrich_section(
-    gateway: MergeRequestGateway,
-    table_id: str,
-    merge_requests: list[MergeRequest],
-    update_row: Callable[[str, str, Approvals | Failed], None],
-    sleep: Callable[[float], None] = time.sleep,
-) -> None:
-    for mr in merge_requests:
-        if _enrichment_quit_requested():
-            break
-        result = _enrich_merge_request_with_retry(gateway, mr, sleep)
-        if _enrichment_quit_requested():
-            break
-        if result is None:
-            update_row(table_id, _row_key(mr), Failed())
-        else:
-            update_row(table_id, _row_key(mr), result)
 
 
 class GlabDashApp(App):
@@ -143,7 +86,6 @@ class GlabDashApp(App):
         Binding("enter", "focus_preview", "Focus preview", show=False, priority=True),
         Binding("escape", "unfocus_preview", "Back to list", show=False, priority=True),
         Binding("r", "refresh", "Refresh", show=False),
-        Binding("R", "retry_failed_enrichment", "Retry failed", show=False),
         Binding("?", "toggle_help_panel", "Help", show=False),
         Binding("q", "quit", "Quit", show=False),
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
@@ -158,7 +100,6 @@ class GlabDashApp(App):
         self._merge_requests_by_table_id: dict[str, dict[str, MergeRequest]] = {}
         self._preview_visible = False
         self._preview_focused = False
-        self._spinner_frame = SPINNER_FRAMES[0]
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -179,14 +120,12 @@ class GlabDashApp(App):
                 "Merge Request",
                 "Labels",
                 "Updated",
-                ("Approvals", "approvals"),
             )
             worker_name = f"section-{index}"
             self._tables_by_worker_name[worker_name] = table
             self._sections_by_worker_name[worker_name] = section
             self._fetch_section(worker_name, section, limit=BOOTUP_MERGE_REQUEST_LIMIT)
         self.set_interval(self._config.refresh_interval, self._refresh_all_sections)
-        self.set_interval(SPINNER_TICK_SECONDS, self._advance_spinner)
         log.info("tui mounted", section_count=len(self._config.sections))
 
     def _fetch_section(
@@ -205,30 +144,6 @@ class GlabDashApp(App):
 
     def action_refresh(self) -> None:
         self._refresh_all_sections()
-
-    def action_retry_failed_enrichment(self) -> None:
-        table = self._active_table()
-        if table is None or table.id is None:
-            return
-        merge_requests_by_row_key = self._merge_requests_by_table_id.get(table.id, {})
-        failed_merge_requests = [
-            mr for mr in merge_requests_by_row_key.values() if isinstance(mr.approvals, Failed)
-        ]
-        if not failed_merge_requests:
-            return
-        index = table.id.removeprefix("table-")
-        self.run_worker(
-            partial(
-                _enrich_section,
-                self._gateway,
-                table.id,
-                failed_merge_requests,
-                partial(self.call_from_thread, self._update_enriched_row),
-            ),
-            name=f"section-{index}-enrich-retry",
-            thread=True,
-            exit_on_error=False,
-        )
 
     def _active_table(self) -> DataTable | None:
         tabbed_content = self.query_one(TabbedContent)
@@ -354,57 +269,16 @@ class GlabDashApp(App):
         table.clear()
         for mr in merge_requests:
             state_icon, extended_title, labels, updated_at = render_mr_row(mr)
-            approvals_cell = render_approvals(mr.approvals, self._spinner_frame)
             table.add_row(
                 state_icon,
                 extended_title,
                 labels,
                 updated_at,
-                approvals_cell,
                 height=MR_ROW_HEIGHT,
                 key=_row_key(mr),
             )
         if table.row_count:
             table.move_cursor(row=min(previous_cursor_row, table.row_count - 1))
-        index = event.worker.name.removeprefix("section-")
-        self.run_worker(
-            partial(
-                _enrich_section,
-                self._gateway,
-                table.id,
-                merge_requests,
-                partial(self.call_from_thread, self._update_enriched_row),
-            ),
-            name=f"section-{index}-enrich",
-            group=f"section-{index}-enrich",
-            exclusive=True,
-            thread=True,
-            exit_on_error=False,
-        )
-
-    def _update_enriched_row(
-        self,
-        table_id: str,
-        row_key: str,
-        approvals: Approvals | Failed,
-    ) -> None:
-        merge_requests_by_row_key = self._merge_requests_by_table_id.get(table_id)
-        if merge_requests_by_row_key is None or row_key not in merge_requests_by_row_key:
-            return
-        merge_requests_by_row_key[row_key] = replace(
-            merge_requests_by_row_key[row_key], approvals=approvals
-        )
-        table = self.query_one(f"#{table_id}", DataTable)
-        table.update_cell(row_key, "approvals", render_approvals(approvals, self._spinner_frame))
-
-    def _advance_spinner(self) -> None:
-        frame_index = (SPINNER_FRAMES.index(self._spinner_frame) + 1) % len(SPINNER_FRAMES)
-        self._spinner_frame = SPINNER_FRAMES[frame_index]
-        for table_id, merge_requests_by_row_key in self._merge_requests_by_table_id.items():
-            table = self.query_one(f"#{table_id}", DataTable)
-            for row_key, mr in merge_requests_by_row_key.items():
-                if isinstance(mr.approvals, Pending):
-                    table.update_cell(row_key, "approvals", self._spinner_frame)
 
     def _render_section_error(self, worker_name: str, error: BaseException | None) -> None:
         table = self._tables_by_worker_name.get(worker_name)

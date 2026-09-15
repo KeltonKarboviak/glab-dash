@@ -8,7 +8,7 @@ from textual.worker import Worker, active_worker
 
 from glab_dash.application.list_merge_requests import list_merge_requests_for_section
 from glab_dash.domain.config import MergeRequestState, Scope, Section
-from glab_dash.domain.merge_request import Approvals, LineStats, Pending, SectionNotFoundError
+from glab_dash.domain.merge_request import Approvals, LineStats, SectionNotFoundError
 from glab_dash.infrastructure.gitlab_gateway import (
     GITLAB_COM_URL,
     GitlabMergeRequestGateway,
@@ -97,7 +97,7 @@ class FakeProjectManager:
     def __init__(self, projects_by_path: dict[str, FakeProject]) -> None:
         self._projects_by_path = projects_by_path
 
-    def get(self, project_path: str) -> FakeProject:
+    def get(self, project_path: str, lazy: bool = False) -> FakeProject:
         return self._projects_by_path[project_path]
 
 
@@ -110,7 +110,7 @@ class FakeGroupManager:
     def __init__(self, groups_by_path: dict[str, FakeGroup]) -> None:
         self._groups_by_path = groups_by_path
 
-    def get(self, group_path: str) -> FakeGroup:
+    def get(self, group_path: str, lazy: bool = False) -> FakeGroup:
         return self._groups_by_path[group_path]
 
 
@@ -203,14 +203,17 @@ def test_get_merge_request_detail_unresolved_discussion_count_excludes_resolved_
     assert detail.unresolved_discussion_count == 2
 
 
-def test_list_project_merge_requests_leaves_approvals_pending() -> None:
+def test_list_project_merge_requests_does_not_call_approvals_get() -> None:
     raw_mr = make_raw_mr(approved_by=[{"username": "octocat"}], approvals_required=2)
+
+    def _raise_if_touched() -> NoReturn:
+        raise AssertionError("listing must not fetch approvals")
+
+    raw_mr.approvals.get = _raise_if_touched
     client = FakeGitlabClient({"group/project": FakeProject([raw_mr])})
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    result = gateway.list_project_merge_requests("group/project")
-
-    assert result[0].approvals == Pending()
+    gateway.list_project_merge_requests("group/project")
 
 
 def test_enrich_merge_request_returns_approvals_from_a_freshly_fetched_mr() -> None:
@@ -333,8 +336,6 @@ def test_lists_a_groups_merge_requests_without_project_only_managers() -> None:
     result = gateway.list_group_merge_requests("team")
 
     assert len(result) == 1
-    mr = result[0]
-    assert mr.approvals == Pending()
 
 
 def test_lists_global_merge_requests_without_project_only_managers() -> None:
@@ -345,8 +346,6 @@ def test_lists_global_merge_requests_without_project_only_managers() -> None:
     result = gateway.list_global_merge_requests()
 
     assert len(result) == 1
-    mr = result[0]
-    assert mr.approvals == Pending()
 
 
 def test_global_scope_requests_all_visible_mrs_not_just_the_authenticated_users() -> None:
@@ -551,11 +550,17 @@ def test_get_merge_request_detail_returns_description_discussions_and_diff() -> 
 
 
 class RaisingManager:
+    """Fakes `lazy=True`'s deferred failure: `.get()` succeeds, and the error
+    surfaces once something (here, `.mergerequests.list()`) actually calls the API."""
+
     def __init__(self, response_code: int) -> None:
         self._response_code = response_code
 
-    def get(self, path: str) -> SimpleNamespace:
-        raise gitlab.exceptions.GitlabGetError(response_code=self._response_code)
+    def get(self, path: str, lazy: bool = False) -> SimpleNamespace:
+        def _raise(**_kwargs: object) -> None:
+            raise gitlab.exceptions.GitlabListError(response_code=self._response_code)
+
+        return SimpleNamespace(mergerequests=SimpleNamespace(list=_raise))
 
 
 def test_list_group_merge_requests_raises_section_not_found_on_404() -> None:
@@ -581,7 +586,7 @@ def test_list_group_merge_requests_reraises_non_404_gitlab_errors() -> None:
     client.groups = cast("FakeGroupManager", RaisingManager(response_code=500))
     gateway = GitlabMergeRequestGateway(cast("gitlab.Gitlab", client))
 
-    with pytest.raises(gitlab.exceptions.GitlabGetError):
+    with pytest.raises(gitlab.exceptions.GitlabListError):
         gateway.list_group_merge_requests("data-platform")
 
 

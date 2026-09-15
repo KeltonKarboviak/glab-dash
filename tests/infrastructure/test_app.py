@@ -1,4 +1,3 @@
-import time
 from typing import cast
 
 import pytest
@@ -17,7 +16,6 @@ from glab_dash.domain.merge_request import (
     SectionNotFoundError,
 )
 from glab_dash.infrastructure.tui.app import GlabDashApp
-from glab_dash.infrastructure.tui.rows import FAILED_GLYPH
 
 
 class FakeGateway:
@@ -54,7 +52,7 @@ class FakeGateway:
         return self._detail
 
     def enrich_merge_request(self, project: str, iid: int) -> Approvals:
-        return Approvals(given=0, required=0)
+        raise AssertionError("not used in these tests")
 
 
 class FailingGateway:
@@ -72,39 +70,6 @@ class FailingGateway:
 
     def enrich_merge_request(self, project: str, iid: int) -> Approvals:
         raise AssertionError("not used in these tests")
-
-
-class SlowCycleGateway:
-    """Fake gateway whose enrichment is slow and tags results with the fetch cycle.
-
-    Lets tests catch a refresh mid-enrichment and assert only the latest
-    cycle's values ever land on the table.
-    """
-
-    def __init__(self, merge_requests: list[MergeRequest], delay: float) -> None:
-        self._merge_requests = merge_requests
-        self._delay = delay
-        self._cycle = 0
-        self.enrich_calls = 0
-
-    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
-        self._cycle += 1
-        return self._merge_requests
-
-    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
-        return self._merge_requests
-
-    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
-        return self._merge_requests
-
-    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
-        raise AssertionError("not used in these tests")
-
-    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
-        self.enrich_calls += 1
-        time.sleep(self._delay)
-        cycle = self._cycle
-        return Approvals(given=cycle, required=cycle)
 
 
 def _make_mr(iid: int = 1) -> MergeRequest:
@@ -375,13 +340,13 @@ async def test_bootup_fetches_a_single_page_but_refresh_fetches_everything() -> 
     async with app.run_test() as pilot:
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert gateway.received_limits == [20]
+        assert gateway.received_limits == [4]
 
         await pilot.press("r")
         await app.workers.wait_for_complete()
         await pilot.pause()
 
-        assert gateway.received_limits == [20, None]
+        assert gateway.received_limits == [4, None]
 
 
 async def test_refresh_preserves_the_active_tab_and_cursor_position() -> None:
@@ -473,34 +438,6 @@ async def test_q_quits_the_app() -> None:
         assert app.is_running is False
 
 
-async def test_first_paint_success_starts_enrichment_and_resolves_cells(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = Config(
-        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
-    )
-    gateway = FakeGateway([_make_mr()])
-    app = GlabDashApp(config, gateway)
-
-    worker_names = []
-    original_run_worker = app.run_worker
-
-    def tracking_run_worker(*args, **kwargs):
-        worker_names.append(kwargs.get("name"))
-        return original_run_worker(*args, **kwargs)
-
-    monkeypatch.setattr(app, "run_worker", tracking_run_worker)
-
-    async with app.run_test() as pilot:
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-
-        assert "section-0-enrich" in worker_names
-        table = app.query_one("#table-0", DataTable)
-        row_key = "group/project#1"
-        assert table.get_cell(row_key, "approvals") == "0/0"
-
-
 async def test_question_mark_toggles_the_help_panel() -> None:
     config = Config(
         sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
@@ -515,147 +452,3 @@ async def test_question_mark_toggles_the_help_panel() -> None:
         await pilot.press("?")
         await pilot.pause()
         assert not app.screen.query("HelpPanel")
-
-
-async def test_refresh_cancels_in_flight_enrichment_and_lands_only_the_fresh_cycle() -> None:
-    config = Config(
-        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
-    )
-    merge_requests = [_make_mr(iid=i) for i in range(1, 6)]
-    gateway = SlowCycleGateway(merge_requests, delay=0.1)
-    app = GlabDashApp(config, gateway)
-
-    async with app.run_test() as pilot:
-        await pilot.pause(0.15)
-        table = app.query_one("#table-0", DataTable)
-        assert table.row_count == 5
-
-        await pilot.press("j")
-        assert table.cursor_row == 1
-
-        await pilot.press("r")
-        await app.workers.wait_for_complete()
-        await pilot.pause(0.2)
-
-        for mr in merge_requests:
-            row_key = f"group/project#{mr.iid}"
-            assert table.get_cell(row_key, "approvals") == "2/2"
-        # cycle 1's enrichment must have been cut off, not left to run to
-        # completion in the background: 2 full cycles of 5 rows would be 10.
-        assert gateway.enrich_calls < 2 * len(merge_requests)
-
-
-async def test_q_quits_promptly_while_enrichment_is_running() -> None:
-    config = Config(
-        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
-    )
-    merge_requests = [_make_mr(iid=i) for i in range(1, 6)]
-    gateway = SlowCycleGateway(merge_requests, delay=0.05)
-    app = GlabDashApp(config, gateway)
-
-    async with app.run_test() as pilot:
-        await pilot.pause(0.05)
-
-        started = time.monotonic()
-        await pilot.press("q")
-        elapsed = time.monotonic() - started
-
-        assert app.is_running is False
-        assert elapsed < 1.0
-
-
-class FailingEnrichGateway:
-    """Fake gateway whose enrichment always raises, to exercise the retry/failure path."""
-
-    def __init__(self, merge_requests: list[MergeRequest]) -> None:
-        self._merge_requests = merge_requests
-        self.enrich_calls = 0
-
-    def list_project_merge_requests(self, project: str, **_filters: object) -> list[MergeRequest]:
-        return self._merge_requests
-
-    def list_group_merge_requests(self, group: str, **_filters: object) -> list[MergeRequest]:
-        return self._merge_requests
-
-    def list_global_merge_requests(self, **_filters: object) -> list[MergeRequest]:
-        return self._merge_requests
-
-    def get_merge_request_detail(self, project: str, iid: int) -> MergeRequestDetail:
-        raise AssertionError("not used in these tests")
-
-    def enrich_merge_request(self, project: str, iid: int) -> Approvals:
-        self.enrich_calls += 1
-        raise RuntimeError("gitlab api boom")
-
-
-async def test_persistent_enrichment_failure_shows_failed_glyph_after_retries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("glab_dash.infrastructure.tui.app.time.sleep", lambda _seconds: None)
-    config = Config(
-        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
-    )
-    gateway = FailingEnrichGateway([_make_mr()])
-    app = GlabDashApp(config, gateway)
-
-    async with app.run_test() as pilot:
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-
-        table = app.query_one("#table-0", DataTable)
-        row_key = "group/project#1"
-        assert table.get_cell(row_key, "approvals") == FAILED_GLYPH
-        # 3 total attempts per MR: 1 initial + 2 retries.
-        assert gateway.enrich_calls == 3
-
-
-async def test_retry_keybind_only_re_enriches_failed_rows_in_the_active_section(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("glab_dash.infrastructure.tui.app.time.sleep", lambda _seconds: None)
-    config = Config(
-        sections=[Section(title="My Project", scope=Scope.PROJECT, project="group/project")]
-    )
-    ok_mr = _make_mr(iid=1)
-    failing_mr = _make_mr(iid=2)
-    gateway = FakeGateway([ok_mr])
-
-    original_enrich = gateway.enrich_merge_request
-
-    def enrich_merge_request(project: str, iid: int) -> Approvals:
-        if iid == failing_mr.iid:
-            raise RuntimeError("gitlab api boom")
-        return original_enrich(project, iid)
-
-    gateway.enrich_merge_request = enrich_merge_request  # ty: ignore[invalid-assignment]
-    gateway._merge_requests = [ok_mr, failing_mr]
-
-    app = GlabDashApp(config, gateway)
-
-    async with app.run_test() as pilot:
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-
-        table = app.query_one("#table-0", DataTable)
-        ok_row_key = "group/project#1"
-        failing_row_key = "group/project#2"
-        assert table.get_cell(ok_row_key, "approvals") == "0/0"
-        assert table.get_cell(failing_row_key, "approvals") == FAILED_GLYPH
-
-        call_counts: dict[int, int] = {}
-        original_retry_enrich = gateway.enrich_merge_request
-
-        def counting_enrich(project: str, iid: int) -> Approvals:
-            call_counts[iid] = call_counts.get(iid, 0) + 1
-            return original_retry_enrich(project, iid)
-
-        gateway.enrich_merge_request = counting_enrich  # ty: ignore[invalid-assignment]
-
-        await pilot.press("R")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-
-        assert 1 not in call_counts
-        assert call_counts.get(2) == 3
-        assert table.get_cell(ok_row_key, "approvals") == "0/0"
-        assert table.get_cell(failing_row_key, "approvals") == FAILED_GLYPH
